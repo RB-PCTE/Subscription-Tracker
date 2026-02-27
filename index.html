@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Subscription Tracker</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <main class="container">
+      <h1>Subscription Tracker</h1>
+
+      <section class="card" aria-labelledby="auth-heading">
+        <h2 id="auth-heading">Authentication</h2>
+
+        <div id="signed-out-view">
+          <label for="email-input">Email</label>
+          <div class="row">
+            <input id="email-input" type="email" placeholder="you@example.com" autocomplete="email" />
+            <button id="send-magic-link-btn" type="button">Send magic link</button>
+          </div>
+        </div>
+
+        <div id="signed-in-view" hidden>
+          <p>Signed in as <strong id="user-email"></strong></p>
+          <button id="sign-out-btn" type="button">Sign out</button>
+        </div>
+
+        <p id="auth-status" role="status" aria-live="polite"></p>
+      </section>
+    </main>
+
+    <script type="module" src="./app.js"></script>
+  </body>
+</html>
