@@ -15,9 +15,16 @@
 
         <div id="signed-out-view">
           <label for="email-input">Email</label>
-          <div class="row">
+          <div class="row auth-row">
             <input id="email-input" type="email" placeholder="you@example.com" autocomplete="email" />
             <button id="send-magic-link-btn" type="button">Send magic link</button>
+          </div>
+
+          <label for="password-input">Password</label>
+          <div class="row auth-row">
+            <input id="password-input" type="password" placeholder="••••••••" autocomplete="current-password" />
+            <button id="sign-in-password-btn" type="button">Sign in with password</button>
+            <button id="sign-up-password-btn" type="button" class="secondary">Sign up with password</button>
           </div>
         </div>
 

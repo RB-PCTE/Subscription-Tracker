@@ -3,7 +3,10 @@ import { supabase } from "./supabaseClient.js";
 const signedOutView = document.getElementById("signed-out-view");
 const signedInView = document.getElementById("signed-in-view");
 const emailInput = document.getElementById("email-input");
+const passwordInput = document.getElementById("password-input");
 const sendMagicLinkButton = document.getElementById("send-magic-link-btn");
+const signInPasswordButton = document.getElementById("sign-in-password-btn");
+const signUpPasswordButton = document.getElementById("sign-up-password-btn");
 const signOutButton = document.getElementById("sign-out-btn");
 const userEmail = document.getElementById("user-email");
 const authStatus = document.getElementById("auth-status");
@@ -396,11 +399,82 @@ async function sendMagicLink() {
   sendMagicLinkButton.disabled = false;
 
   if (error) {
+    const isRateLimited = error.status === 429 || error.message.toLowerCase().includes("rate limit");
+
+    if (isRateLimited) {
+      setStatus("Email rate limited. Use password sign-in or try later.", true);
+      return;
+    }
+
     setStatus(`Error sending magic link: ${error.message}`, true);
     return;
   }
 
   setStatus("Magic link sent! Check your inbox.");
+}
+
+function getAuthCredentials() {
+  const email = emailInput.value.trim();
+  const password = passwordInput.value;
+
+  if (!email) {
+    setStatus("Please enter your email address.", true);
+    return null;
+  }
+
+  if (!password) {
+    setStatus("Please enter your password.", true);
+    return null;
+  }
+
+  return { email, password };
+}
+
+async function signInWithPassword() {
+  const credentials = getAuthCredentials();
+
+  if (!credentials) {
+    return;
+  }
+
+  signInPasswordButton.disabled = true;
+  setStatus("Signing in with password...");
+
+  const { error } = await supabase.auth.signInWithPassword(credentials);
+  signInPasswordButton.disabled = false;
+
+  if (error) {
+    setStatus(`Error signing in with password: ${error.message}`, true);
+    return;
+  }
+
+  setStatus("Signed in with password.");
+}
+
+async function signUpWithPassword() {
+  const credentials = getAuthCredentials();
+
+  if (!credentials) {
+    return;
+  }
+
+  signUpPasswordButton.disabled = true;
+  setStatus("Creating account...");
+
+  const { error, data } = await supabase.auth.signUp(credentials);
+  signUpPasswordButton.disabled = false;
+
+  if (error) {
+    setStatus(`Error signing up with password: ${error.message}`, true);
+    return;
+  }
+
+  if (data?.user && !data.session) {
+    setStatus("Account created. Check your email to confirm your account, then sign in.");
+    return;
+  }
+
+  setStatus("Signed up with password.");
 }
 
 async function signOut() {
@@ -424,6 +498,8 @@ subscriptionsBody.addEventListener("click", handleTableClick);
 subscriptionForm.addEventListener("submit", saveSubscription);
 cancelSubscriptionButton.addEventListener("click", () => subscriptionDialog.close());
 sendMagicLinkButton.addEventListener("click", sendMagicLink);
+signInPasswordButton.addEventListener("click", signInWithPassword);
+signUpPasswordButton.addEventListener("click", signUpWithPassword);
 signOutButton.addEventListener("click", signOut);
 
 supabase.auth.onAuthStateChange((event, session) => {
