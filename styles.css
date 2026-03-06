@@ -208,6 +208,13 @@ h2 {
   font-size: var(--font-size-xl);
 }
 
+.page-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-4);
+}
+
 h3 {
   margin: 0 0 var(--space-3);
 }
@@ -248,6 +255,48 @@ h3 {
   align-items: center;
 }
 
+.subscriptions-header {
+  margin-bottom: var(--space-4);
+}
+
+.subscriptions-header h2 {
+  margin-bottom: var(--space-1);
+}
+
+.subscriptions-toolbar {
+  display: grid;
+  grid-template-columns: minmax(220px, 2fr) repeat(4, minmax(160px, 1fr));
+  gap: var(--space-3);
+  align-items: end;
+  background: #f8fafc;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  padding: var(--space-3);
+}
+
+.toolbar-field {
+  display: grid;
+  gap: var(--space-1);
+}
+
+.toolbar-field span {
+  font-size: 0.75rem;
+  color: var(--color-text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.toolbar-field input,
+.toolbar-field select {
+  width: 100%;
+  min-width: 0;
+  background: #ffffff;
+}
+
+.toolbar-search {
+  grid-column: 1 / 2;
+}
+
 input {
   min-width: 220px;
   flex: 1;
@@ -264,10 +313,41 @@ input {
   overflow-x: auto;
 }
 
+.subscriptions-table-wrap {
+  margin-top: var(--space-3);
+  max-height: 520px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: #ffffff;
+}
+
 table {
   width: 100%;
   border-collapse: collapse;
   margin-top: var(--space-2);
+}
+
+.subscriptions-table {
+  margin-top: 0;
+}
+
+.subscriptions-table thead th {
+  position: sticky;
+  top: 0;
+  background: #f8fafc;
+  z-index: 1;
+  font-size: 0.78rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--color-text-secondary);
+}
+
+.subscriptions-table tbody tr {
+  transition: background-color 160ms ease;
+}
+
+.subscriptions-table tbody tr:hover {
+  background: #f8fafc;
 }
 
 th,
@@ -278,9 +358,95 @@ td {
   vertical-align: top;
 }
 
+.subscriptions-table th,
+.subscriptions-table td {
+  padding: 0.85rem 0.9rem;
+}
+
+.subscription-name-cell strong {
+  display: block;
+  font-size: 0.95rem;
+}
+
+.subscription-name-cell span {
+  color: var(--color-text-secondary);
+  font-size: 0.82rem;
+}
+
+.amount-cell {
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
 .actions {
   display: flex;
   gap: var(--space-2);
+}
+
+.action-row {
+  flex-wrap: wrap;
+}
+
+.table-action {
+  padding: 0.38rem 0.55rem;
+  font-size: 0.8rem;
+}
+
+.danger-action {
+  color: var(--color-danger);
+  border-color: #fecaca;
+  background: #fff1f2;
+}
+
+.danger-action:hover:not(:disabled) {
+  background: #ffe4e6;
+}
+
+.status-pill {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 999px;
+  padding: 0.2rem 0.6rem;
+  font-size: 0.76rem;
+  font-weight: 600;
+  border: 1px solid transparent;
+}
+
+.status-active {
+  color: #166534;
+  background: #dcfce7;
+  border-color: #86efac;
+}
+
+.status-trial,
+.status-pending {
+  color: #92400e;
+  background: #fef3c7;
+  border-color: #fcd34d;
+}
+
+.status-cancelled,
+.status-expired {
+  color: #9f1239;
+  background: #ffe4e6;
+  border-color: #fda4af;
+}
+
+.renewal-cell {
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.renewal-warning {
+  color: #92400e;
+}
+
+.renewal-urgent {
+  color: #b91c1c;
+}
+
+.renewal-normal {
+  color: #1f2937;
 }
 
 .empty-state {
@@ -289,6 +455,20 @@ td {
   border: 1px dashed #c7d2fe;
   border-radius: var(--radius-md);
   margin-top: var(--space-3);
+  background: #f8fafc;
+}
+
+.empty-state p {
+  margin: 0;
+}
+
+#empty-state-title {
+  font-weight: 600;
+  margin-bottom: var(--space-2);
+}
+
+.content-panel.is-loading .subscriptions-table-wrap {
+  opacity: 0.55;
 }
 
 .renewals-list {
@@ -409,6 +589,29 @@ dialog::backdrop {
   }
 
   .dashboard-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .subscriptions-toolbar {
+    grid-template-columns: repeat(2, minmax(160px, 1fr));
+  }
+
+  .toolbar-search {
+    grid-column: 1 / -1;
+  }
+}
+
+@media (max-width: 680px) {
+  .subscriptions-header {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .subscriptions-header button {
+    width: 100%;
+  }
+
+  .subscriptions-toolbar {
     grid-template-columns: 1fr;
   }
 }

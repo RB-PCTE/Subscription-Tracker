@@ -24,11 +24,18 @@ const metricUserRole = document.getElementById("metric-user-role");
 const subscriptionsSection = document.getElementById("subscriptions-section");
 const addSubscriptionButton = document.getElementById("add-subscription-btn");
 const emptyAddButton = document.getElementById("empty-add-btn");
+const subscriptionsSubtitle = document.getElementById("subscriptions-subtitle");
+const emptyStateTitle = document.getElementById("empty-state-title");
+const emptyStateCopy = document.getElementById("empty-state-copy");
 const searchInput = document.getElementById("search-input");
 const statusFilter = document.getElementById("status-filter");
+const frequencyFilter = document.getElementById("frequency-filter");
+const ownerFilter = document.getElementById("owner-filter");
+const sortControl = document.getElementById("sort-control");
 const subscriptionsBody = document.getElementById("subscriptions-body");
 const subscriptionStatus = document.getElementById("subscription-status");
 const emptyState = document.getElementById("empty-state");
+const subscriptionsTableWrap = document.querySelector(".subscriptions-table-wrap");
 const userManagementSection = document.getElementById("user-management-section");
 const inviteForm = document.getElementById("invite-form");
 const inviteEmailInput = document.getElementById("invite-email-input");
@@ -133,14 +140,97 @@ function formatAmount(row) {
 }
 
 function formatDate(dateString) {
-  return dateString || "";
+  if (!dateString) {
+    return "";
+  }
+
+  const parsed = new Date(dateString);
+  if (Number.isNaN(parsed.getTime())) {
+    return dateString;
+  }
+
+  return parsed.toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" });
+}
+
+function formatSubscriptionName(row) {
+  return row.product_name || row.plan || row.vendor_name || "Untitled subscription";
+}
+
+function formatOwner(row) {
+  return row.owner || row.owner_name || row.created_by || "Unassigned";
+}
+
+function toStatusLabel(value) {
+  const normalized = (value || "unknown").toLowerCase();
+  return normalized.charAt(0).toUpperCase() + normalized.slice(1);
+}
+
+function getRenewalUrgency(renewalDate) {
+  if (!renewalDate) {
+    return "renewal-none";
+  }
+
+  const dateValue = new Date(renewalDate);
+  if (Number.isNaN(dateValue.getTime())) {
+    return "renewal-none";
+  }
+
+  const now = new Date();
+  now.setHours(0, 0, 0, 0);
+  const renewal = new Date(dateValue);
+  renewal.setHours(0, 0, 0, 0);
+  const daysUntil = Math.floor((renewal.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
+
+  if (daysUntil < 0) {
+    return "renewal-urgent";
+  }
+
+  if (daysUntil <= 7) {
+    return "renewal-warning";
+  }
+
+  return "renewal-normal";
+}
+
+function populateFilterOptions() {
+  const statuses = [...new Set(subscriptions.map((row) => (row.status || "unknown").toLowerCase()).filter(Boolean))].sort();
+  const frequencies = [...new Set(subscriptions.map((row) => (row.billing_cycle || "unspecified").toLowerCase()).filter(Boolean))].sort();
+  const owners = [...new Set(subscriptions.map((row) => formatOwner(row)).filter(Boolean))].sort((a, b) =>
+    a.localeCompare(b)
+  );
+
+  statusFilter.innerHTML = '<option value="all">All statuses</option>';
+  statuses.forEach((status) => {
+    const option = document.createElement("option");
+    option.value = status;
+    option.textContent = toStatusLabel(status);
+    statusFilter.appendChild(option);
+  });
+
+  frequencyFilter.innerHTML = '<option value="all">All frequencies</option>';
+  frequencies.forEach((frequency) => {
+    const option = document.createElement("option");
+    option.value = frequency;
+    option.textContent = toStatusLabel(frequency);
+    frequencyFilter.appendChild(option);
+  });
+
+  ownerFilter.innerHTML = '<option value="all">All owners</option>';
+  owners.forEach((owner) => {
+    const option = document.createElement("option");
+    option.value = owner;
+    option.textContent = owner;
+    ownerFilter.appendChild(option);
+  });
 }
 
 function getFilteredSubscriptions() {
   const query = searchInput.value.trim().toLowerCase();
   const selectedStatus = statusFilter.value;
+  const selectedFrequency = frequencyFilter.value;
+  const selectedOwner = ownerFilter.value;
 
-  return subscriptions.filter((row) => {
+  const filtered = subscriptions.filter((row) => {
     const matchesSearch =
       !query ||
       (row.vendor_name || "").toLowerCase().includes(query) ||
@@ -148,15 +238,51 @@ function getFilteredSubscriptions() {
       (row.plan || "").toLowerCase().includes(query);
 
     const matchesStatus = selectedStatus === "all" || (row.status || "").toLowerCase() === selectedStatus;
+    const matchesFrequency =
+      selectedFrequency === "all" || (row.billing_cycle || "").toLowerCase() === selectedFrequency;
+    const matchesOwner = selectedOwner === "all" || formatOwner(row) === selectedOwner;
 
-    return matchesSearch && matchesStatus;
+    return matchesSearch && matchesStatus && matchesFrequency && matchesOwner;
   });
+
+  const sorted = [...filtered];
+  switch (sortControl.value) {
+    case "renewal-desc":
+      sorted.sort((a, b) => new Date(b.renewal_date || 0).getTime() - new Date(a.renewal_date || 0).getTime());
+      break;
+    case "cost-desc":
+      sorted.sort((a, b) => (Number(b.cost_amount) || 0) - (Number(a.cost_amount) || 0));
+      break;
+    case "cost-asc":
+      sorted.sort((a, b) => (Number(a.cost_amount) || 0) - (Number(b.cost_amount) || 0));
+      break;
+    case "name-asc":
+      sorted.sort((a, b) => formatSubscriptionName(a).localeCompare(formatSubscriptionName(b)));
+      break;
+    default:
+      sorted.sort((a, b) => new Date(a.renewal_date || 0).getTime() - new Date(b.renewal_date || 0).getTime());
+      break;
+  }
+
+  return sorted;
 }
 
 function renderSubscriptions(rows) {
   subscriptionsBody.innerHTML = "";
+  subscriptionsSubtitle.textContent = `${subscriptions.length} total subscription${subscriptions.length === 1 ? "" : "s"}`;
 
   if (rows.length === 0) {
+    const hasFilters =
+      searchInput.value.trim().length > 0 ||
+      statusFilter.value !== "all" ||
+      frequencyFilter.value !== "all" ||
+      ownerFilter.value !== "all";
+
+    emptyStateTitle.textContent = hasFilters ? "No matching subscriptions" : "No subscriptions yet";
+    emptyStateCopy.textContent = hasFilters
+      ? "Try adjusting your search or filters to find what you need."
+      : "Track your first subscription to build your workspace.";
+    emptyAddButton.hidden = hasFilters;
     emptyState.hidden = false;
     return;
   }
@@ -165,32 +291,63 @@ function renderSubscriptions(rows) {
 
   rows.forEach((row) => {
     const tr = document.createElement("tr");
+    tr.className = "subscription-row";
 
-    const fields = [
-      row.vendor_name || "",
-      row.product_name || "",
-      row.plan || "",
-      formatAmount(row),
-      row.billing_cycle || "",
-      formatDate(row.renewal_date),
-      row.status || "",
-    ];
+    const nameTd = document.createElement("td");
+    nameTd.className = "subscription-name-cell";
+    nameTd.innerHTML = `<strong>${formatSubscriptionName(row)}</strong><span>${row.plan || "No plan"}</span>`;
+    tr.appendChild(nameTd);
 
-    fields.forEach((value) => {
-      const td = document.createElement("td");
-      td.textContent = value;
-      tr.appendChild(td);
-    });
+    const vendorTd = document.createElement("td");
+    vendorTd.textContent = row.vendor_name || "";
+    tr.appendChild(vendorTd);
+
+    const ownerTd = document.createElement("td");
+    ownerTd.textContent = formatOwner(row);
+    tr.appendChild(ownerTd);
+
+    const amountTd = document.createElement("td");
+    amountTd.textContent = formatAmount(row) || "—";
+    amountTd.className = "amount-cell";
+    tr.appendChild(amountTd);
+
+    const cycleTd = document.createElement("td");
+    cycleTd.textContent = row.billing_cycle || "—";
+    tr.appendChild(cycleTd);
+
+    const renewalTd = document.createElement("td");
+    renewalTd.textContent = formatDate(row.renewal_date) || "No renewal date";
+    renewalTd.className = `renewal-cell ${getRenewalUrgency(row.renewal_date)}`;
+    tr.appendChild(renewalTd);
+
+    const statusTd = document.createElement("td");
+    const statusPill = document.createElement("span");
+    const statusValue = (row.status || "unknown").toLowerCase();
+    statusPill.className = `status-pill status-${statusValue.replace(/\s+/g, "-")}`;
+    statusPill.textContent = toStatusLabel(statusValue);
+    statusTd.appendChild(statusPill);
+    tr.appendChild(statusTd);
 
     const actionsTd = document.createElement("td");
     const actions = document.createElement("div");
-    actions.className = "actions";
+    actions.className = "actions action-row";
 
     const { canEdit, canDelete } = getCurrentPermissions();
+
+    if (canEdit || !canDelete) {
+      const viewButton = document.createElement("button");
+      viewButton.type = "button";
+      viewButton.className = "secondary table-action";
+      viewButton.dataset.action = "view";
+      viewButton.dataset.id = row.id;
+      viewButton.textContent = canEdit ? "View" : "Details";
+      actions.appendChild(viewButton);
+    }
 
     if (canEdit) {
       const editButton = document.createElement("button");
       editButton.type = "button";
+      editButton.className = "secondary table-action";
       editButton.dataset.action = "edit";
       editButton.dataset.id = row.id;
       editButton.textContent = "Edit";
@@ -200,6 +357,7 @@ function renderSubscriptions(rows) {
     if (canDelete) {
       const deleteButton = document.createElement("button");
       deleteButton.type = "button";
+      deleteButton.className = "secondary table-action danger-action";
       deleteButton.dataset.action = "delete";
       deleteButton.dataset.id = row.id;
       deleteButton.textContent = "Delete";
@@ -255,14 +413,20 @@ function refreshVisibleSubscriptions() {
 
 function setBusyState(isBusy) {
   loadingSubscriptions = isBusy;
+  subscriptionsSection.classList.toggle("is-loading", isBusy);
   addSubscriptionButton.disabled = isBusy;
   emptyAddButton.disabled = isBusy;
   searchInput.disabled = isBusy;
   statusFilter.disabled = isBusy;
+  frequencyFilter.disabled = isBusy;
+  ownerFilter.disabled = isBusy;
+  sortControl.disabled = isBusy;
+  subscriptionsTableWrap?.setAttribute("aria-busy", isBusy ? "true" : "false");
 }
 
 function clearSubscriptions() {
   subscriptions = [];
+  populateFilterOptions();
   subscriptionsBody.innerHTML = "";
   emptyState.hidden = true;
   setSubscriptionStatus("");
@@ -406,6 +570,7 @@ async function loadSubscriptions() {
   }
 
   subscriptions = data || [];
+  populateFilterOptions();
   refreshVisibleSubscriptions();
   renderRenewalsPanel();
   updateDashboardMetrics();
@@ -602,6 +767,10 @@ function handleTableClick(event) {
   const row = subscriptions.find((subscription) => subscription.id === id);
 
   if (action === "edit" && row) {
+    openEditForm(row);
+  }
+
+  if (action === "view" && row) {
     openEditForm(row);
   }
 
@@ -960,6 +1129,9 @@ function handleNavClick(event) {
 
 searchInput.addEventListener("input", refreshVisibleSubscriptions);
 statusFilter.addEventListener("change", refreshVisibleSubscriptions);
+frequencyFilter.addEventListener("change", refreshVisibleSubscriptions);
+ownerFilter.addEventListener("change", refreshVisibleSubscriptions);
+sortControl.addEventListener("change", refreshVisibleSubscriptions);
 addSubscriptionButton.addEventListener("click", openAddForm);
 emptyAddButton.addEventListener("click", openAddForm);
 newSubscriptionCta.addEventListener("click", () => {

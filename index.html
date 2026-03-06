@@ -107,36 +107,70 @@
             aria-labelledby="subscriptions-heading"
             hidden
           >
-            <h2 id="subscriptions-heading">Subscriptions</h2>
+            <div class="page-header subscriptions-header">
+              <div>
+                <h2 id="subscriptions-heading">Subscriptions</h2>
+                <p id="subscriptions-subtitle" class="helper-text">0 total subscriptions</p>
+              </div>
+              <button id="add-subscription-btn" type="button">+ New subscription</button>
+            </div>
 
-            <div class="toolbar">
-              <button id="add-subscription-btn" type="button">Add subscription</button>
-              <input
-                id="search-input"
-                type="search"
-                placeholder="Search vendor, product, or plan"
-                aria-label="Search subscriptions"
-              />
-              <select id="status-filter" aria-label="Filter by status">
-                <option value="all">All</option>
-                <option value="active">active</option>
-                <option value="cancelled">cancelled</option>
-                <option value="expired">expired</option>
-              </select>
+            <div class="subscriptions-toolbar" aria-label="Subscription filters">
+              <label class="toolbar-field toolbar-search" for="search-input">
+                <span class="sr-only">Search subscriptions</span>
+                <input
+                  id="search-input"
+                  type="search"
+                  placeholder="Search subscription, vendor, or plan"
+                  aria-label="Search subscriptions"
+                />
+              </label>
+
+              <label class="toolbar-field" for="status-filter">
+                <span>Status</span>
+                <select id="status-filter" aria-label="Filter by status">
+                  <option value="all">All statuses</option>
+                </select>
+              </label>
+
+              <label class="toolbar-field" for="frequency-filter">
+                <span>Billing frequency</span>
+                <select id="frequency-filter" aria-label="Filter by billing frequency">
+                  <option value="all">All frequencies</option>
+                </select>
+              </label>
+
+              <label class="toolbar-field" for="owner-filter">
+                <span>Owner</span>
+                <select id="owner-filter" aria-label="Filter by owner">
+                  <option value="all">All owners</option>
+                </select>
+              </label>
+
+              <label class="toolbar-field" for="sort-control">
+                <span>Sort</span>
+                <select id="sort-control" aria-label="Sort subscriptions">
+                  <option value="renewal-asc">Renewal date (soonest)</option>
+                  <option value="renewal-desc">Renewal date (latest)</option>
+                  <option value="cost-desc">Cost (high to low)</option>
+                  <option value="cost-asc">Cost (low to high)</option>
+                  <option value="name-asc">Subscription name (A-Z)</option>
+                </select>
+              </label>
             </div>
 
             <p id="subscription-status" role="status" aria-live="polite"></p>
 
-            <div class="table-wrap">
-              <table>
+            <div class="table-wrap subscriptions-table-wrap">
+              <table class="subscriptions-table">
                 <thead>
                   <tr>
+                    <th>Subscription name</th>
                     <th>Vendor</th>
-                    <th>Product</th>
-                    <th>Plan</th>
-                    <th>Amount</th>
-                    <th>Cycle</th>
-                    <th>Renewal</th>
+                    <th>Owner</th>
+                    <th>Cost</th>
+                    <th>Billing frequency</th>
+                    <th>Renewal date</th>
                     <th>Status</th>
                     <th>Actions</th>
                   </tr>
@@ -146,8 +180,9 @@
             </div>
 
             <div id="empty-state" class="empty-state" hidden>
-              <p>No subscriptions yet</p>
-              <button id="empty-add-btn" type="button">Add subscription</button>
+              <p id="empty-state-title">No subscriptions yet</p>
+              <p id="empty-state-copy" class="helper-text">Track your first subscription to build your workspace.</p>
+              <button id="empty-add-btn" type="button">+ New subscription</button>
             </div>
           </section>
 
