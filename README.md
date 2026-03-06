@@ -38,6 +38,97 @@ Create a table named `public.subscriptions` with these columns:
 
 Enable RLS and add policies so authenticated users can read and write rows needed by this app (select, insert, update, delete).
 
+### Invite-based user access (admin flow)
+
+Create an invites table so admins can grant access by email:
+
+```sql
+create extension if not exists pgcrypto;
+
+create table if not exists public.app_invites (
+  id uuid primary key default gen_random_uuid(),
+  email text unique not null,
+  role text not null,
+  created_at timestamptz not null default now()
+);
+
+alter table public.app_invites enable row level security;
+```
+
+Add simple RLS policies for `public.app_invites`:
+
+```sql
+-- Any authenticated user can read invite rows for their own email.
+create policy "invite self read"
+on public.app_invites
+for select
+to authenticated
+using (lower(email) = lower(auth.jwt()->>'email'));
+
+-- Admins can read all invites.
+create policy "admin read all invites"
+on public.app_invites
+for select
+to authenticated
+using (
+  exists (
+    select 1
+    from public.app_users au
+    where au.user_id = auth.uid() and au.role = 'admin'
+  )
+);
+
+-- Admins can insert/update/delete invites.
+create policy "admin insert invites"
+on public.app_invites
+for insert
+to authenticated
+with check (
+  exists (
+    select 1
+    from public.app_users au
+    where au.user_id = auth.uid() and au.role = 'admin'
+  )
+);
+
+create policy "admin update invites"
+on public.app_invites
+for update
+to authenticated
+using (
+  exists (
+    select 1
+    from public.app_users au
+    where au.user_id = auth.uid() and au.role = 'admin'
+  )
+)
+with check (
+  exists (
+    select 1
+    from public.app_users au
+    where au.user_id = auth.uid() and au.role = 'admin'
+  )
+);
+
+create policy "admin delete invites"
+on public.app_invites
+for delete
+to authenticated
+using (
+  exists (
+    select 1
+    from public.app_users au
+    where au.user_id = auth.uid() and au.role = 'admin'
+  )
+);
+```
+
+When a user signs in, the app checks:
+
+1. If `public.app_users` already contains their `user_id`, use that role.
+2. If not, look up `public.app_invites` by signed-in email.
+3. If invite exists, upsert a new `public.app_users` row (`user_id`, `role`) and delete the invite.
+
 ## Getting started
 
 ```bash

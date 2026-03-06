@@ -81,6 +81,57 @@
           <button id="empty-add-btn" type="button">Add subscription</button>
         </div>
       </section>
+
+      <section id="user-management-section" class="card" aria-labelledby="user-management-heading" hidden>
+        <h2 id="user-management-heading">User Management</h2>
+
+        <form id="invite-form" class="toolbar" novalidate>
+          <input
+            id="invite-email-input"
+            type="email"
+            placeholder="invitee@example.com"
+            aria-label="Invite email"
+            required
+          />
+          <select id="invite-role-select" aria-label="Invite role">
+            <option value="admin">admin</option>
+            <option value="member" selected>member</option>
+            <option value="viewer">viewer</option>
+          </select>
+          <button id="grant-access-btn" type="submit">Grant access</button>
+        </form>
+
+        <p id="user-management-status" role="status" aria-live="polite"></p>
+
+        <h3>Pending invites</h3>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Email</th>
+                <th>Role</th>
+                <th>Created</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody id="invites-body"></tbody>
+          </table>
+        </div>
+
+        <h3>Current app users</h3>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>User ID</th>
+                <th>Role</th>
+                <th>Created</th>
+              </tr>
+            </thead>
+            <tbody id="app-users-body"></tbody>
+          </table>
+        </div>
+      </section>
     </main>
 
     <dialog id="subscription-dialog">
