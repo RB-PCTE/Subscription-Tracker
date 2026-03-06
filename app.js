@@ -20,6 +20,14 @@ const statusFilter = document.getElementById("status-filter");
 const subscriptionsBody = document.getElementById("subscriptions-body");
 const subscriptionStatus = document.getElementById("subscription-status");
 const emptyState = document.getElementById("empty-state");
+const userManagementSection = document.getElementById("user-management-section");
+const inviteForm = document.getElementById("invite-form");
+const inviteEmailInput = document.getElementById("invite-email-input");
+const inviteRoleSelect = document.getElementById("invite-role-select");
+const grantAccessButton = document.getElementById("grant-access-btn");
+const userManagementStatus = document.getElementById("user-management-status");
+const invitesBody = document.getElementById("invites-body");
+const appUsersBody = document.getElementById("app-users-body");
 
 const subscriptionDialog = document.getElementById("subscription-dialog");
 const subscriptionForm = document.getElementById("subscription-form");
@@ -36,9 +44,9 @@ let isSubmittingForm = false;
 let loadingSubscriptions = false;
 
 const ROLE_PERMISSIONS = {
-  admin: { canAdd: true, canEdit: true, canDelete: true },
-  member: { canAdd: true, canEdit: true, canDelete: false },
-  viewer: { canAdd: false, canEdit: false, canDelete: false },
+  admin: { canAdd: true, canEdit: true, canDelete: true, canManageUsers: true },
+  member: { canAdd: true, canEdit: true, canDelete: false, canManageUsers: false },
+  viewer: { canAdd: false, canEdit: false, canDelete: false, canManageUsers: false },
 };
 
 function getCurrentPermissions() {
@@ -51,9 +59,10 @@ function setRoleStatus(message, isError = false) {
 }
 
 function applyRoleUi() {
-  const { canAdd } = getCurrentPermissions();
+  const { canAdd, canManageUsers } = getCurrentPermissions();
   addSubscriptionButton.hidden = !canAdd;
   emptyAddButton.hidden = !canAdd;
+  userManagementSection.hidden = !canManageUsers;
 }
 
 function setStatus(message, isError = false) {
@@ -64,6 +73,11 @@ function setStatus(message, isError = false) {
 function setSubscriptionStatus(message, isError = false) {
   subscriptionStatus.textContent = message;
   subscriptionStatus.style.color = isError ? "#b91c1c" : "#0f172a";
+}
+
+function setUserManagementStatus(message, isError = false) {
+  userManagementStatus.textContent = message;
+  userManagementStatus.style.color = isError ? "#b91c1c" : "#0f172a";
 }
 
 function formatAmount(row) {
@@ -174,6 +188,119 @@ function clearSubscriptions() {
   subscriptionsBody.innerHTML = "";
   emptyState.hidden = true;
   setSubscriptionStatus("");
+}
+
+function clearUserManagementTables() {
+  invitesBody.innerHTML = "";
+  appUsersBody.innerHTML = "";
+  setUserManagementStatus("");
+}
+
+function formatTimestamp(value) {
+  if (!value) {
+    return "";
+  }
+
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) {
+    return value;
+  }
+
+  return parsed.toLocaleString();
+}
+
+function renderInvites(rows) {
+  invitesBody.innerHTML = "";
+
+  if (!rows.length) {
+    const tr = document.createElement("tr");
+    const td = document.createElement("td");
+    td.colSpan = 4;
+    td.textContent = "No pending invites.";
+    tr.appendChild(td);
+    invitesBody.appendChild(tr);
+    return;
+  }
+
+  rows.forEach((row) => {
+    const tr = document.createElement("tr");
+
+    const emailTd = document.createElement("td");
+    emailTd.textContent = row.email || "";
+    tr.appendChild(emailTd);
+
+    const roleTd = document.createElement("td");
+    roleTd.textContent = row.role || "";
+    tr.appendChild(roleTd);
+
+    const createdTd = document.createElement("td");
+    createdTd.textContent = formatTimestamp(row.created_at);
+    tr.appendChild(createdTd);
+
+    const actionsTd = document.createElement("td");
+    const removeButton = document.createElement("button");
+    removeButton.type = "button";
+    removeButton.className = "secondary";
+    removeButton.dataset.action = "remove-invite";
+    removeButton.dataset.id = row.id;
+    removeButton.textContent = "Remove invite";
+    actionsTd.appendChild(removeButton);
+    tr.appendChild(actionsTd);
+
+    invitesBody.appendChild(tr);
+  });
+}
+
+function renderAppUsers(rows) {
+  appUsersBody.innerHTML = "";
+
+  if (!rows.length) {
+    const tr = document.createElement("tr");
+    const td = document.createElement("td");
+    td.colSpan = 3;
+    td.textContent = "No app users found.";
+    tr.appendChild(td);
+    appUsersBody.appendChild(tr);
+    return;
+  }
+
+  rows.forEach((row) => {
+    const tr = document.createElement("tr");
+    const values = [row.user_id || "", row.role || "", formatTimestamp(row.created_at)];
+    values.forEach((value) => {
+      const td = document.createElement("td");
+      td.textContent = value;
+      tr.appendChild(td);
+    });
+    appUsersBody.appendChild(tr);
+  });
+}
+
+async function loadUserManagement() {
+  const { canManageUsers } = getCurrentPermissions();
+
+  if (!canManageUsers) {
+    clearUserManagementTables();
+    return;
+  }
+
+  setUserManagementStatus("Loading users and invites...");
+
+  const [{ data: invitesData, error: invitesError }, { data: appUsersData, error: appUsersError }] =
+    await Promise.all([
+      supabase.from("app_invites").select("id, email, role, created_at").order("created_at", { ascending: false }),
+      supabase.from("app_users").select("user_id, role, created_at").order("created_at", { ascending: false }),
+    ]);
+
+  if (invitesError || appUsersError) {
+    const message = invitesError?.message || appUsersError?.message || "Unknown error loading user management.";
+    setUserManagementStatus(`Unable to load user management: ${message}`, true);
+    return;
+  }
+
+  renderInvites(invitesData || []);
+  renderAppUsers(appUsersData || []);
+  setUserManagementStatus("User management loaded.");
 }
 
 async function loadSubscriptions() {
@@ -415,6 +542,65 @@ async function fetchUserRole(userId) {
   return data?.role ? data.role.toLowerCase() : null;
 }
 
+async function getInviteForEmail(email) {
+  const normalizedEmail = (email || "").trim().toLowerCase();
+
+  if (!normalizedEmail) {
+    return null;
+  }
+
+  const { data, error } = await supabase
+    .from("app_invites")
+    .select("id, role")
+    .eq("email", normalizedEmail)
+    .maybeSingle();
+
+  if (error) {
+    throw error;
+  }
+
+  return data;
+}
+
+async function ensureAppUserFromInvite(user) {
+  if (!user?.id || !user?.email) {
+    return null;
+  }
+
+  const existingRole = await fetchUserRole(user.id);
+
+  if (existingRole) {
+    return existingRole;
+  }
+
+  const invite = await getInviteForEmail(user.email);
+
+  if (!invite?.role) {
+    return null;
+  }
+
+  const normalizedRole = invite.role.toLowerCase();
+  const { error: upsertError } = await supabase.from("app_users").upsert(
+    {
+      user_id: user.id,
+      role: normalizedRole,
+    },
+    { onConflict: "user_id" }
+  );
+
+  if (upsertError) {
+    throw upsertError;
+  }
+
+  const { error: deleteInviteError } = await supabase.from("app_invites").delete().eq("id", invite.id);
+
+  if (deleteInviteError) {
+    console.warn("Unable to delete invite after provisioning user", deleteInviteError);
+  }
+
+  return normalizedRole;
+}
+
 async function renderAuthState(user) {
   const isSignedIn = Boolean(user);
   currentUser = user;
@@ -434,19 +620,21 @@ async function renderAuthState(user) {
     setRoleStatus("Role: signed out");
     applyRoleUi();
     clearSubscriptions();
+    clearUserManagementTables();
     return;
   }
 
   setRoleStatus("Role: loading...");
 
   try {
-    const role = await fetchUserRole(user.id);
+    const role = await ensureAppUserFromInvite(user);
 
     if (!role) {
       setRoleStatus("Role: not authorised", true);
       subscriptionsSection.hidden = true;
       applyRoleUi();
       clearSubscriptions();
+      clearUserManagementTables();
       setStatus("You are signed in but not authorised to use this app. Contact an admin.", true);
       return;
     }
@@ -465,14 +653,87 @@ async function renderAuthState(user) {
     applyRoleUi();
     subscriptionsSection.hidden = false;
     void loadSubscriptions();
+    void loadUserManagement();
   } catch (error) {
     console.error("fetchUserRole error", error);
     setRoleStatus("Role: unavailable", true);
     subscriptionsSection.hidden = true;
     applyRoleUi();
     clearSubscriptions();
+    clearUserManagementTables();
     setStatus(`Signed in, but unable to load your role: ${error.message}`, true);
   }
+}
+
+async function grantAccess(event) {
+  event.preventDefault();
+
+  const { canManageUsers } = getCurrentPermissions();
+
+  if (!canManageUsers) {
+    setUserManagementStatus("Your role does not allow managing users.", true);
+    return;
+  }
+
+  const email = inviteEmailInput.value.trim().toLowerCase();
+  const role = inviteRoleSelect.value;
+
+  if (!email) {
+    setUserManagementStatus("Please provide an email address.", true);
+    return;
+  }
+
+  grantAccessButton.disabled = true;
+  setUserManagementStatus("Granting access...");
+
+  const { error } = await supabase.from("app_invites").upsert(
+    {
+      email,
+      role,
+    },
+    { onConflict: "email" }
+  );
+
+  grantAccessButton.disabled = false;
+
+  if (error) {
+    setUserManagementStatus(`Unable to grant access: ${error.message}`, true);
+    return;
+  }
+
+  inviteEmailInput.value = "";
+  inviteRoleSelect.value = "member";
+  setUserManagementStatus("Access granted. Invite saved.");
+  await loadUserManagement();
+}
+
+async function removeInvite(id) {
+  const { canManageUsers } = getCurrentPermissions();
+
+  if (!canManageUsers) {
+    setUserManagementStatus("Your role does not allow managing users.", true);
+    return;
+  }
+
+  const { error } = await supabase.from("app_invites").delete().eq("id", id);
+
+  if (error) {
+    setUserManagementStatus(`Unable to remove invite: ${error.message}`, true);
+    return;
+  }
+
+  setUserManagementStatus("Invite removed.");
+  await loadUserManagement();
+}
+
+function handleInvitesClick(event) {
+  const button = event.target.closest("button[data-action='remove-invite']");
+
+  if (!button?.dataset.id) {
+    return;
+  }
+
+  void removeInvite(button.dataset.id);
 }
 
 async function loadUser() {
@@ -606,6 +867,8 @@ emptyAddButton.addEventListener("click", openAddForm);
 subscriptionsBody.addEventListener("click", handleTableClick);
 subscriptionForm.addEventListener("submit", saveSubscription);
 cancelSubscriptionButton.addEventListener("click", () => subscriptionDialog.close());
+inviteForm.addEventListener("submit", grantAccess);
+invitesBody.addEventListener("click", handleInvitesClick);
 sendMagicLinkButton.addEventListener("click", sendMagicLink);
 signInPasswordButton.addEventListener("click", signInWithPassword);
 signUpPasswordButton.addEventListener("click", signUpWithPassword);

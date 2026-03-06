@@ -76,9 +76,14 @@ button:disabled {
 }
 
 #auth-status,
-#subscription-status {
+#subscription-status,
+#user-management-status {
   margin-top: 0.75rem;
   min-height: 1.25rem;
+}
+
+#user-management-section h3 {
+  margin: 1rem 0 0.5rem;
 }
 
 .table-wrap {
