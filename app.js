@@ -11,6 +11,15 @@ const signOutButton = document.getElementById("sign-out-btn");
 const userEmail = document.getElementById("user-email");
 const authStatus = document.getElementById("auth-status");
 const roleStatus = document.getElementById("role-status");
+const currentUserArea = document.getElementById("current-user-area");
+const newSubscriptionCta = document.getElementById("new-subscription-cta");
+const adminNavGroup = document.getElementById("admin-nav-group");
+const navButtons = document.querySelectorAll("[data-nav-target]");
+const contentPanels = document.querySelectorAll(".content-panel");
+
+const metricTotalSubscriptions = document.getElementById("metric-total-subscriptions");
+const metricActiveSubscriptions = document.getElementById("metric-active-subscriptions");
+const metricUserRole = document.getElementById("metric-user-role");
 
 const subscriptionsSection = document.getElementById("subscriptions-section");
 const addSubscriptionButton = document.getElementById("add-subscription-btn");
@@ -28,6 +37,10 @@ const grantAccessButton = document.getElementById("grant-access-btn");
 const userManagementStatus = document.getElementById("user-management-status");
 const invitesBody = document.getElementById("invites-body");
 const appUsersBody = document.getElementById("app-users-body");
+const adminUsersPanel = document.getElementById("admin-users-panel");
+const adminInvitesPanel = document.getElementById("admin-invites-panel");
+
+const renewalsList = document.getElementById("renewals-list");
 
 const subscriptionDialog = document.getElementById("subscription-dialog");
 const subscriptionForm = document.getElementById("subscription-form");
@@ -42,6 +55,7 @@ let subscriptions = [];
 let editingSubscriptionId = null;
 let isSubmittingForm = false;
 let loadingSubscriptions = false;
+let activeView = "dashboard";
 
 const ROLE_PERMISSIONS = {
   admin: { canAdd: true, canEdit: true, canDelete: true, canManageUsers: true },
@@ -63,6 +77,35 @@ function applyRoleUi() {
   addSubscriptionButton.hidden = !canAdd;
   emptyAddButton.hidden = !canAdd;
   userManagementSection.hidden = !canManageUsers;
+  adminNavGroup.hidden = !canManageUsers;
+  newSubscriptionCta.hidden = !canAdd;
+
+  if (!canManageUsers && activeView.startsWith("admin-")) {
+    setActiveView("dashboard");
+  }
+}
+
+function setActiveView(view) {
+  activeView = view;
+
+  contentPanels.forEach((panel) => {
+    panel.classList.toggle("is-view-hidden", panel.dataset.view !== view);
+  });
+
+  navButtons.forEach((button) => {
+    button.classList.toggle("is-active", button.dataset.navTarget === view);
+  });
+
+  if (view === "admin-users") {
+    adminUsersPanel.hidden = false;
+    adminInvitesPanel.hidden = true;
+  } else if (view === "admin-invites") {
+    adminUsersPanel.hidden = true;
+    adminInvitesPanel.hidden = false;
+  } else {
+    adminUsersPanel.hidden = false;
+    adminInvitesPanel.hidden = false;
+  }
 }
 
 function setStatus(message, isError = false) {
@@ -170,6 +213,41 @@ function renderSubscriptions(rows) {
   });
 }
 
+function updateDashboardMetrics() {
+  const activeCount = subscriptions.filter((row) => (row.status || "").toLowerCase() === "active").length;
+  metricTotalSubscriptions.textContent = String(subscriptions.length);
+  metricActiveSubscriptions.textContent = String(activeCount);
+  metricUserRole.textContent = currentUserRole || "signed out";
+}
+
+function renderRenewalsPanel() {
+  if (!subscriptions.length) {
+    renewalsList.innerHTML = '<div class="renewal-item"><p>No renewal data yet. Add subscriptions to populate this view.</p></div>';
+    return;
+  }
+
+  const upcomingRows = subscriptions
+    .filter((row) => row.renewal_date)
+    .sort((a, b) => new Date(a.renewal_date).getTime() - new Date(b.renewal_date).getTime())
+    .slice(0, 6);
+
+  if (!upcomingRows.length) {
+    renewalsList.innerHTML = '<div class="renewal-item"><p>No upcoming renewal dates found.</p></div>';
+    return;
+  }
+
+  renewalsList.innerHTML = "";
+
+  upcomingRows.forEach((row) => {
+    const item = document.createElement("article");
+    item.className = "renewal-item";
+    item.innerHTML = `<p><strong>${row.vendor_name || "Unknown vendor"}</strong> • ${row.plan || "No plan"}</p><p>${formatDate(
+      row.renewal_date
+    )} • ${formatAmount(row) || "Amount not set"}</p>`;
+    renewalsList.appendChild(item);
+  });
+}
+
 function refreshVisibleSubscriptions() {
   const filtered = getFilteredSubscriptions();
   renderSubscriptions(filtered);
@@ -188,6 +266,8 @@ function clearSubscriptions() {
   subscriptionsBody.innerHTML = "";
   emptyState.hidden = true;
   setSubscriptionStatus("");
+  renderRenewalsPanel();
+  updateDashboardMetrics();
 }
 
 function clearUserManagementTables() {
@@ -327,6 +407,8 @@ async function loadSubscriptions() {
 
   subscriptions = data || [];
   refreshVisibleSubscriptions();
+  renderRenewalsPanel();
+  updateDashboardMetrics();
   setSubscriptionStatus("Subscriptions loaded.");
 }
 
@@ -612,15 +694,19 @@ async function renderAuthState(user) {
 
   if (user?.email) {
     userEmail.textContent = user.email;
+    currentUserArea.textContent = user.email;
   } else {
     userEmail.textContent = "";
+    currentUserArea.textContent = "Not signed in";
   }
 
   if (!isSignedIn) {
     setRoleStatus("Role: signed out");
+    metricUserRole.textContent = "signed out";
     applyRoleUi();
     clearSubscriptions();
     clearUserManagementTables();
+    setActiveView("dashboard");
     return;
   }
 
@@ -631,6 +717,7 @@ async function renderAuthState(user) {
 
     if (!role) {
       setRoleStatus("Role: not authorised", true);
+      metricUserRole.textContent = "not authorised";
       subscriptionsSection.hidden = true;
       applyRoleUi();
       clearSubscriptions();
@@ -650,6 +737,7 @@ async function renderAuthState(user) {
       setRoleStatus(`Role: ${role}`);
     }
 
+    metricUserRole.textContent = role;
     applyRoleUi();
     subscriptionsSection.hidden = false;
     void loadSubscriptions();
@@ -860,10 +948,25 @@ async function signOut() {
   setStatus("Signed out.");
 }
 
+function handleNavClick(event) {
+  const button = event.target.closest("[data-nav-target]");
+
+  if (!button?.dataset.navTarget) {
+    return;
+  }
+
+  setActiveView(button.dataset.navTarget);
+}
+
 searchInput.addEventListener("input", refreshVisibleSubscriptions);
 statusFilter.addEventListener("change", refreshVisibleSubscriptions);
 addSubscriptionButton.addEventListener("click", openAddForm);
 emptyAddButton.addEventListener("click", openAddForm);
+newSubscriptionCta.addEventListener("click", () => {
+  setActiveView("subscriptions");
+  openAddForm();
+});
+document.querySelector(".sidebar-nav").addEventListener("click", handleNavClick);
 subscriptionsBody.addEventListener("click", handleTableClick);
 subscriptionForm.addEventListener("submit", saveSubscription);
 cancelSubscriptionButton.addEventListener("click", () => subscriptionDialog.close());

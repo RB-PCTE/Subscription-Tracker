@@ -7,132 +7,230 @@
     <link rel="stylesheet" href="./styles.css" />
   </head>
   <body>
-    <main class="container">
-      <h1>Subscription Tracker</h1>
+    <div class="app-shell">
+      <aside class="sidebar" aria-label="Primary navigation">
+        <div class="sidebar-brand">
+          <p class="brand-kicker">Workspace</p>
+          <h1>Subscription Tracker</h1>
+        </div>
 
-      <section class="card" aria-labelledby="auth-heading">
-        <h2 id="auth-heading">Authentication</h2>
+        <nav class="sidebar-nav">
+          <button type="button" class="nav-item is-active" data-nav-target="dashboard" id="nav-dashboard">Dashboard</button>
+          <button type="button" class="nav-item" data-nav-target="subscriptions" id="nav-subscriptions">Subscriptions</button>
+          <button type="button" class="nav-item" data-nav-target="renewals" id="nav-renewals">Renewals</button>
 
-        <div id="signed-out-view">
-          <label for="email-input">Email</label>
-          <div class="row auth-row">
-            <input id="email-input" type="email" placeholder="you@example.com" autocomplete="email" />
-            <button id="send-magic-link-btn" type="button">Send magic link</button>
+          <div id="admin-nav-group" hidden>
+            <p class="nav-group-label">Admin</p>
+            <button type="button" class="nav-item nav-item-sub" data-nav-target="admin-users" id="nav-admin-users">Users</button>
+            <button
+              type="button"
+              class="nav-item nav-item-sub"
+              data-nav-target="admin-invites"
+              id="nav-admin-invites"
+            >
+              Invites
+            </button>
+          </div>
+        </nav>
+      </aside>
+
+      <div class="app-main">
+        <header class="top-header">
+          <div class="top-header-title">
+            <p class="brand-kicker">SaaS Console</p>
+            <p>Manage billing access and renewals</p>
           </div>
 
-          <label for="password-input">Password</label>
-          <div class="row auth-row">
-            <input id="password-input" type="password" placeholder="••••••••" autocomplete="current-password" />
-            <button id="sign-in-password-btn" type="button">Sign in with password</button>
-            <button id="sign-up-password-btn" type="button" class="secondary">Sign up with password</button>
+          <label class="header-search" for="global-search-input">
+            <span class="sr-only">Search</span>
+            <input id="global-search-input" type="search" placeholder="Search subscriptions, users, and invites" />
+          </label>
+
+          <div class="header-actions">
+            <button id="new-subscription-cta" type="button">+ New subscription</button>
+            <div id="current-user-area" class="current-user-area" aria-live="polite">Not signed in</div>
           </div>
-        </div>
+        </header>
 
-        <div id="signed-in-view" hidden>
-          <p>Signed in as <strong id="user-email"></strong></p>
-          <p id="role-status">Role: unknown</p>
-          <button id="sign-out-btn" type="button">Sign out</button>
-        </div>
+        <main class="content-area">
+          <section id="dashboard-section" class="card content-panel" data-view="dashboard" aria-labelledby="dashboard-heading">
+            <h2 id="dashboard-heading">Dashboard</h2>
+            <p class="helper-text">Quick snapshot of your workspace and authentication state.</p>
 
-        <p id="auth-status" role="status" aria-live="polite"></p>
-      </section>
+            <div class="dashboard-grid">
+              <article class="metric-card">
+                <h3>Total subscriptions</h3>
+                <p id="metric-total-subscriptions">0</p>
+              </article>
+              <article class="metric-card">
+                <h3>Active renewals tracked</h3>
+                <p id="metric-active-subscriptions">0</p>
+              </article>
+              <article class="metric-card">
+                <h3>Your role</h3>
+                <p id="metric-user-role">signed out</p>
+              </article>
+            </div>
 
-      <section id="subscriptions-section" class="card" aria-labelledby="subscriptions-heading" hidden>
-        <h2 id="subscriptions-heading">Subscriptions</h2>
+            <section class="card nested-card" aria-labelledby="auth-heading">
+              <h3 id="auth-heading">Authentication</h3>
 
-        <div class="toolbar">
-          <button id="add-subscription-btn" type="button">Add subscription</button>
-          <input
-            id="search-input"
-            type="search"
-            placeholder="Search vendor, product, or plan"
-            aria-label="Search subscriptions"
-          />
-          <select id="status-filter" aria-label="Filter by status">
-            <option value="all">All</option>
-            <option value="active">active</option>
-            <option value="cancelled">cancelled</option>
-            <option value="expired">expired</option>
-          </select>
-        </div>
+              <div id="signed-out-view">
+                <label for="email-input">Email</label>
+                <div class="row auth-row">
+                  <input id="email-input" type="email" placeholder="you@example.com" autocomplete="email" />
+                  <button id="send-magic-link-btn" type="button">Send magic link</button>
+                </div>
 
-        <p id="subscription-status" role="status" aria-live="polite"></p>
+                <label for="password-input">Password</label>
+                <div class="row auth-row">
+                  <input
+                    id="password-input"
+                    type="password"
+                    placeholder="••••••••"
+                    autocomplete="current-password"
+                  />
+                  <button id="sign-in-password-btn" type="button">Sign in with password</button>
+                  <button id="sign-up-password-btn" type="button" class="secondary">Sign up with password</button>
+                </div>
+              </div>
 
-        <div class="table-wrap">
-          <table>
-            <thead>
-              <tr>
-                <th>Vendor</th>
-                <th>Product</th>
-                <th>Plan</th>
-                <th>Amount</th>
-                <th>Cycle</th>
-                <th>Renewal</th>
-                <th>Status</th>
-                <th>Actions</th>
-              </tr>
-            </thead>
-            <tbody id="subscriptions-body"></tbody>
-          </table>
-        </div>
+              <div id="signed-in-view" hidden>
+                <p>Signed in as <strong id="user-email"></strong></p>
+                <p id="role-status">Role: unknown</p>
+                <button id="sign-out-btn" type="button" class="secondary">Sign out</button>
+              </div>
 
-        <div id="empty-state" class="empty-state" hidden>
-          <p>No subscriptions yet</p>
-          <button id="empty-add-btn" type="button">Add subscription</button>
-        </div>
-      </section>
+              <p id="auth-status" role="status" aria-live="polite"></p>
+            </section>
+          </section>
 
-      <section id="user-management-section" class="card" aria-labelledby="user-management-heading" hidden>
-        <h2 id="user-management-heading">User Management</h2>
+          <section
+            id="subscriptions-section"
+            class="card content-panel is-view-hidden"
+            data-view="subscriptions"
+            aria-labelledby="subscriptions-heading"
+            hidden
+          >
+            <h2 id="subscriptions-heading">Subscriptions</h2>
 
-        <form id="invite-form" class="toolbar" novalidate>
-          <input
-            id="invite-email-input"
-            type="email"
-            placeholder="invitee@example.com"
-            aria-label="Invite email"
-            required
-          />
-          <select id="invite-role-select" aria-label="Invite role">
-            <option value="admin">admin</option>
-            <option value="member" selected>member</option>
-            <option value="viewer">viewer</option>
-          </select>
-          <button id="grant-access-btn" type="submit">Grant access</button>
-        </form>
+            <div class="toolbar">
+              <button id="add-subscription-btn" type="button">Add subscription</button>
+              <input
+                id="search-input"
+                type="search"
+                placeholder="Search vendor, product, or plan"
+                aria-label="Search subscriptions"
+              />
+              <select id="status-filter" aria-label="Filter by status">
+                <option value="all">All</option>
+                <option value="active">active</option>
+                <option value="cancelled">cancelled</option>
+                <option value="expired">expired</option>
+              </select>
+            </div>
 
-        <p id="user-management-status" role="status" aria-live="polite"></p>
+            <p id="subscription-status" role="status" aria-live="polite"></p>
 
-        <h3>Pending invites</h3>
-        <div class="table-wrap">
-          <table>
-            <thead>
-              <tr>
-                <th>Email</th>
-                <th>Role</th>
-                <th>Created</th>
-                <th>Actions</th>
-              </tr>
-            </thead>
-            <tbody id="invites-body"></tbody>
-          </table>
-        </div>
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Vendor</th>
+                    <th>Product</th>
+                    <th>Plan</th>
+                    <th>Amount</th>
+                    <th>Cycle</th>
+                    <th>Renewal</th>
+                    <th>Status</th>
+                    <th>Actions</th>
+                  </tr>
+                </thead>
+                <tbody id="subscriptions-body"></tbody>
+              </table>
+            </div>
 
-        <h3>Current app users</h3>
-        <div class="table-wrap">
-          <table>
-            <thead>
-              <tr>
-                <th>User ID</th>
-                <th>Role</th>
-                <th>Created</th>
-              </tr>
-            </thead>
-            <tbody id="app-users-body"></tbody>
-          </table>
-        </div>
-      </section>
-    </main>
+            <div id="empty-state" class="empty-state" hidden>
+              <p>No subscriptions yet</p>
+              <button id="empty-add-btn" type="button">Add subscription</button>
+            </div>
+          </section>
+
+          <section
+            id="renewals-section"
+            class="card content-panel is-view-hidden"
+            data-view="renewals"
+            aria-labelledby="renewals-heading"
+          >
+            <h2 id="renewals-heading">Renewals</h2>
+            <p class="helper-text">Upcoming renewal dates from your tracked subscriptions.</p>
+            <div id="renewals-list" class="renewals-list"></div>
+          </section>
+
+          <section
+            id="user-management-section"
+            class="card content-panel is-view-hidden"
+            data-view="admin-users"
+            aria-labelledby="user-management-heading"
+            hidden
+          >
+            <h2 id="user-management-heading">User Management</h2>
+
+            <section id="admin-users-panel" class="admin-panel" aria-labelledby="app-users-heading">
+              <h3 id="app-users-heading">Current app users</h3>
+              <div class="table-wrap">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>User ID</th>
+                      <th>Role</th>
+                      <th>Created</th>
+                    </tr>
+                  </thead>
+                  <tbody id="app-users-body"></tbody>
+                </table>
+              </div>
+            </section>
+
+            <section id="admin-invites-panel" class="admin-panel" aria-labelledby="pending-invites-heading">
+              <h3 id="pending-invites-heading">Pending invites</h3>
+
+              <form id="invite-form" class="toolbar" novalidate>
+                <input
+                  id="invite-email-input"
+                  type="email"
+                  placeholder="invitee@example.com"
+                  aria-label="Invite email"
+                  required
+                />
+                <select id="invite-role-select" aria-label="Invite role">
+                  <option value="admin">admin</option>
+                  <option value="member" selected>member</option>
+                  <option value="viewer">viewer</option>
+                </select>
+                <button id="grant-access-btn" type="submit">Grant access</button>
+              </form>
+
+              <p id="user-management-status" role="status" aria-live="polite"></p>
+
+              <div class="table-wrap">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Email</th>
+                      <th>Role</th>
+                      <th>Created</th>
+                      <th>Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody id="invites-body"></tbody>
+                </table>
+              </div>
+            </section>
+          </section>
+        </main>
+      </div>
+    </div>
 
     <dialog id="subscription-dialog">
       <form id="subscription-form" method="dialog" novalidate>
