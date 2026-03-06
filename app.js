@@ -10,6 +10,7 @@ const signUpPasswordButton = document.getElementById("sign-up-password-btn");
 const signOutButton = document.getElementById("sign-out-btn");
 const userEmail = document.getElementById("user-email");
 const authStatus = document.getElementById("auth-status");
+const roleStatus = document.getElementById("role-status");
 
 const subscriptionsSection = document.getElementById("subscriptions-section");
 const addSubscriptionButton = document.getElementById("add-subscription-btn");
@@ -28,10 +29,32 @@ const saveSubscriptionButton = document.getElementById("save-subscription-btn");
 const cancelSubscriptionButton = document.getElementById("cancel-subscription-btn");
 
 let currentUser = null;
+let currentUserRole = null;
 let subscriptions = [];
 let editingSubscriptionId = null;
 let isSubmittingForm = false;
 let loadingSubscriptions = false;
+
+const ROLE_PERMISSIONS = {
+  admin: { canAdd: true, canEdit: true, canDelete: true },
+  member: { canAdd: true, canEdit: true, canDelete: false },
+  viewer: { canAdd: false, canEdit: false, canDelete: false },
+};
+
+function getCurrentPermissions() {
+  return ROLE_PERMISSIONS[currentUserRole] || { canAdd: false, canEdit: false, canDelete: false };
+}
+
+function setRoleStatus(message, isError = false) {
+  roleStatus.textContent = message;
+  roleStatus.style.color = isError ? "#b91c1c" : "#0f172a";
+}
+
+function applyRoleUi() {
+  const { canAdd } = getCurrentPermissions();
+  addSubscriptionButton.hidden = !canAdd;
+  emptyAddButton.hidden = !canAdd;
+}
 
 function setStatus(message, isError = false) {
   authStatus.textContent = message;
@@ -106,20 +129,26 @@ function renderSubscriptions(rows) {
     const actions = document.createElement("div");
     actions.className = "actions";
 
-    const editButton = document.createElement("button");
-    editButton.type = "button";
-    editButton.dataset.action = "edit";
-    editButton.dataset.id = row.id;
-    editButton.textContent = "Edit";
+    const { canEdit, canDelete } = getCurrentPermissions();
 
-    const deleteButton = document.createElement("button");
-    deleteButton.type = "button";
-    deleteButton.dataset.action = "delete";
-    deleteButton.dataset.id = row.id;
-    deleteButton.textContent = "Delete";
+    if (canEdit) {
+      const editButton = document.createElement("button");
+      editButton.type = "button";
+      editButton.dataset.action = "edit";
+      editButton.dataset.id = row.id;
+      editButton.textContent = "Edit";
+      actions.appendChild(editButton);
+    }
 
-    actions.appendChild(editButton);
-    actions.appendChild(deleteButton);
+    if (canDelete) {
+      const deleteButton = document.createElement("button");
+      deleteButton.type = "button";
+      deleteButton.dataset.action = "delete";
+      deleteButton.dataset.id = row.id;
+      deleteButton.textContent = "Delete";
+      actions.appendChild(deleteButton);
+    }
+
     actionsTd.appendChild(actions);
     tr.appendChild(actionsTd);
 
@@ -148,7 +177,7 @@ function clearSubscriptions() {
 }
 
 async function loadSubscriptions() {
-  if (!currentUser) {
+  if (!currentUser || !currentUserRole) {
     clearSubscriptions();
     return;
   }
@@ -175,6 +204,13 @@ async function loadSubscriptions() {
 }
 
 function openAddForm() {
+  const { canAdd } = getCurrentPermissions();
+
+  if (!canAdd) {
+    setSubscriptionStatus("Your role does not allow adding subscriptions.", true);
+    return;
+  }
+
   editingSubscriptionId = null;
   formTitle.textContent = "Add subscription";
   formError.textContent = "";
@@ -186,6 +222,13 @@ function openAddForm() {
 }
 
 function openEditForm(row) {
+  const { canEdit } = getCurrentPermissions();
+
+  if (!canEdit) {
+    setSubscriptionStatus("Your role does not allow editing subscriptions.", true);
+    return;
+  }
+
   editingSubscriptionId = row.id;
   formTitle.textContent = "Edit subscription";
   formError.textContent = "";
@@ -230,6 +273,12 @@ async function saveSubscription(event) {
   event.preventDefault();
 
   if (isSubmittingForm) {
+    return;
+  }
+
+  const { canAdd, canEdit } = getCurrentPermissions();
+  if ((editingSubscriptionId && !canEdit) || (!editingSubscriptionId && !canAdd)) {
+    formError.textContent = "Your role is not allowed to perform this action.";
     return;
   }
 
@@ -293,6 +342,13 @@ async function saveSubscription(event) {
 }
 
 async function deleteSubscription(id) {
+  const { canDelete } = getCurrentPermissions();
+
+  if (!canDelete) {
+    setSubscriptionStatus("Your role does not allow deleting subscriptions.", true);
+    return;
+  }
+
   if (loadingSubscriptions) {
     return;
   }
@@ -345,9 +401,24 @@ function handleTableClick(event) {
   }
 }
 
-function renderAuthState(user) {
+async function fetchUserRole(userId) {
+  const { data, error } = await supabase
+    .from("app_users")
+    .select("role")
+    .eq("user_id", userId)
+    .maybeSingle();
+
+  if (error) {
+    throw error;
+  }
+
+  return data?.role ? data.role.toLowerCase() : null;
+}
+
+async function renderAuthState(user) {
   const isSignedIn = Boolean(user);
   currentUser = user;
+  currentUserRole = null;
 
   signedOutView.hidden = isSignedIn;
   signedInView.hidden = !isSignedIn;
@@ -359,10 +430,48 @@ function renderAuthState(user) {
     userEmail.textContent = "";
   }
 
-  if (isSignedIn) {
-    void loadSubscriptions();
-  } else {
+  if (!isSignedIn) {
+    setRoleStatus("Role: signed out");
+    applyRoleUi();
     clearSubscriptions();
+    return;
+  }
+
+  setRoleStatus("Role: loading...");
+
+  try {
+    const role = await fetchUserRole(user.id);
+
+    if (!role) {
+      setRoleStatus("Role: not authorised", true);
+      subscriptionsSection.hidden = true;
+      applyRoleUi();
+      clearSubscriptions();
+      setStatus("You are signed in but not authorised to use this app. Contact an admin.", true);
+      return;
+    }
+
+    currentUserRole = role;
+    const hasKnownRole = Boolean(ROLE_PERMISSIONS[role]);
+
+    if (!hasKnownRole) {
+      setRoleStatus(`Role: ${role} (read-only)`);
+      subscriptionsSection.hidden = false;
+      setStatus(`Signed in with unrecognised role \"${role}\". Read-only access applied.`, true);
+    } else {
+      setRoleStatus(`Role: ${role}`);
+    }
+
+    applyRoleUi();
+    subscriptionsSection.hidden = false;
+    void loadSubscriptions();
+  } catch (error) {
+    console.error("fetchUserRole error", error);
+    setRoleStatus("Role: unavailable", true);
+    subscriptionsSection.hidden = true;
+    applyRoleUi();
+    clearSubscriptions();
+    setStatus(`Signed in, but unable to load your role: ${error.message}`, true);
   }
 }
 
@@ -375,7 +484,7 @@ async function loadUser() {
     return;
   }
 
-  renderAuthState(data?.user ?? null);
+  await renderAuthState(data?.user ?? null);
 }
 
 async function sendMagicLink() {
@@ -504,7 +613,7 @@ signOutButton.addEventListener("click", signOut);
 
 supabase.auth.onAuthStateChange((event, session) => {
   console.log("Auth state changed", event);
-  renderAuthState(session?.user ?? null);
+  void renderAuthState(session?.user ?? null);
 });
 
 await loadUser();
