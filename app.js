@@ -55,6 +55,7 @@ const formTitle = document.getElementById("form-title");
 const formError = document.getElementById("form-error");
 const saveSubscriptionButton = document.getElementById("save-subscription-btn");
 const cancelSubscriptionButton = document.getElementById("cancel-subscription-btn");
+const generatedNamePreview = document.getElementById("generated-display-name");
 
 let currentUser = null;
 let currentUserRole = null;
@@ -153,7 +154,111 @@ function formatDate(dateString) {
 }
 
 function formatSubscriptionName(row) {
-  return row.product_name || row.plan || row.vendor_name || "Untitled subscription";
+  const metadata = getSubscriptionMetadata(row);
+  return generateSubscriptionDisplayName(metadata, row);
+}
+
+function parseEmbeddedMetadata(notesValue) {
+  const notesText = (notesValue || "").toString();
+  const marker = "__SUBSCRIPTION_METADATA__:";
+  const markerIndex = notesText.lastIndexOf(marker);
+
+  if (markerIndex === -1) {
+    return { metadata: null, userNotes: notesText.trim() || null };
+  }
+
+  const metadataText = notesText.slice(markerIndex + marker.length).trim();
+  const userNotes = notesText.slice(0, markerIndex).trim() || null;
+
+  if (!metadataText) {
+    return { metadata: null, userNotes };
+  }
+
+  try {
+    const metadata = JSON.parse(metadataText);
+    return { metadata: typeof metadata === "object" && metadata ? metadata : null, userNotes };
+  } catch (error) {
+    console.warn("Unable to parse embedded subscription metadata.", error);
+    return { metadata: null, userNotes: notesText.trim() || null };
+  }
+}
+
+function getSubscriptionMetadata(row = {}) {
+  const embedded = parseEmbeddedMetadata(row.notes);
+  const structured = row.subscription_metadata && typeof row.subscription_metadata === "object" ? row.subscription_metadata : null;
+
+  return {
+    customerCompanyName:
+      row.customer_company_name ||
+      row.customer_company ||
+      structured?.customerCompanyName ||
+      embedded.metadata?.customerCompanyName ||
+      row.vendor_name ||
+      "",
+    contactName: row.contact_name || structured?.contactName || embedded.metadata?.contactName || "",
+    contactEmail: row.contact_email || structured?.contactEmail || embedded.metadata?.contactEmail || "",
+    contactPhone: row.contact_phone || structured?.contactPhone || embedded.metadata?.contactPhone || "",
+    equipmentName:
+      row.equipment_name ||
+      row.device_name ||
+      structured?.equipmentName ||
+      embedded.metadata?.equipmentName ||
+      row.product_name ||
+      "",
+    serialNumber: row.serial_number || structured?.serialNumber || embedded.metadata?.serialNumber || "",
+  };
+}
+
+function buildSubscriptionDisplayNameParts(metadata) {
+  return [metadata.customerCompanyName, metadata.equipmentName, metadata.serialNumber]
+    .map((value) => (value || "").toString().trim())
+    .filter(Boolean);
+}
+
+function generateSubscriptionDisplayName(metadata = {}, row = {}) {
+  const parts = buildSubscriptionDisplayNameParts(metadata);
+
+  if (parts.length >= 2) {
+    return parts.join(" - ");
+  }
+
+  if (parts.length === 1) {
+    return (
+      parts[0] ||
+      row.product_name ||
+      row.vendor_name ||
+      row.plan ||
+      row.name ||
+      row.subscription_name ||
+      "Untitled subscription"
+    );
+  }
+
+  return row.product_name || row.vendor_name || row.plan || row.name || row.subscription_name || "Untitled subscription";
+}
+
+function getDisplayNotes(row) {
+  return parseEmbeddedMetadata(row.notes).userNotes;
+}
+
+function buildNotesWithMetadata(notes, metadata) {
+  const cleanedNotes = (notes || "").toString().trim();
+  const metadataPayload = {
+    customerCompanyName: metadata.customerCompanyName || "",
+    contactName: metadata.contactName || "",
+    contactEmail: metadata.contactEmail || "",
+    contactPhone: metadata.contactPhone || "",
+    equipmentName: metadata.equipmentName || "",
+    serialNumber: metadata.serialNumber || "",
+  };
+
+  const hasMetadataValue = Object.values(metadataPayload).some((value) => value);
+  if (!hasMetadataValue) {
+    return cleanedNotes || null;
+  }
+
+  const metadataBlock = `__SUBSCRIPTION_METADATA__:${JSON.stringify(metadataPayload)}`;
+  return cleanedNotes ? `${cleanedNotes}\n\n${metadataBlock}` : metadataBlock;
 }
 
 function formatOwner(row) {
@@ -233,8 +338,10 @@ function getFilteredSubscriptions() {
   const filtered = subscriptions.filter((row) => {
     const matchesSearch =
       !query ||
-      (row.vendor_name || "").toLowerCase().includes(query) ||
-      (row.product_name || "").toLowerCase().includes(query) ||
+      formatSubscriptionName(row).toLowerCase().includes(query) ||
+      (getSubscriptionMetadata(row).customerCompanyName || "").toLowerCase().includes(query) ||
+      (getSubscriptionMetadata(row).equipmentName || "").toLowerCase().includes(query) ||
+      (getSubscriptionMetadata(row).serialNumber || "").toLowerCase().includes(query) ||
       (row.plan || "").toLowerCase().includes(query);
 
     const matchesStatus = selectedStatus === "all" || (row.status || "").toLowerCase() === selectedStatus;
@@ -295,11 +402,15 @@ function renderSubscriptions(rows) {
 
     const nameTd = document.createElement("td");
     nameTd.className = "subscription-name-cell";
-    nameTd.innerHTML = `<strong>${formatSubscriptionName(row)}</strong><span>${row.plan || "No plan"}</span>`;
+    const metadata = getSubscriptionMetadata(row);
+    const secondaryParts = [row.plan || "No plan", row.billing_cycle || "No billing frequency"];
+    nameTd.innerHTML = `<strong title="${formatSubscriptionName(row)}">${formatSubscriptionName(
+      row
+    )}</strong><span>${secondaryParts.join(" • ")}</span>`;
     tr.appendChild(nameTd);
 
     const vendorTd = document.createElement("td");
-    vendorTd.textContent = row.vendor_name || "";
+    vendorTd.textContent = metadata.customerCompanyName || row.vendor_name || "—";
     tr.appendChild(vendorTd);
 
     const ownerTd = document.createElement("td");
@@ -399,7 +510,7 @@ function renderRenewalsPanel() {
   upcomingRows.forEach((row) => {
     const item = document.createElement("article");
     item.className = "renewal-item";
-    item.innerHTML = `<p><strong>${row.vendor_name || "Unknown vendor"}</strong> • ${row.plan || "No plan"}</p><p>${formatDate(
+    item.innerHTML = `<p><strong>${formatSubscriptionName(row)}</strong> • ${row.plan || "No plan"}</p><p>${formatDate(
       row.renewal_date
     )} • ${formatAmount(row) || "Amount not set"}</p>`;
     renewalsList.appendChild(item);
@@ -590,8 +701,9 @@ function openAddForm() {
   formError.textContent = "";
   subscriptionForm.reset();
   subscriptionForm.elements.cost_currency.value = "AUD";
-  subscriptionForm.elements.billing_cycle.value = "monthly";
+  subscriptionForm.elements.billing_cycle.value = "1 year";
   subscriptionForm.elements.status.value = "active";
+  updateGeneratedNamePreview();
   subscriptionDialog.showModal();
 }
 
@@ -607,40 +719,110 @@ function openEditForm(row) {
   formTitle.textContent = "Edit subscription";
   formError.textContent = "";
 
-  subscriptionForm.elements.vendor_name.value = row.vendor_name || "";
-  subscriptionForm.elements.product_name.value = row.product_name || "";
+  const metadata = getSubscriptionMetadata(row);
+  const userNotes = getDisplayNotes(row);
+
+  subscriptionForm.elements.customer_company_name.value = metadata.customerCompanyName || "";
+  subscriptionForm.elements.contact_name.value = metadata.contactName || "";
+  subscriptionForm.elements.contact_email.value = metadata.contactEmail || "";
+  subscriptionForm.elements.contact_phone.value = metadata.contactPhone || "";
+  subscriptionForm.elements.equipment_name.value = metadata.equipmentName || "";
+  subscriptionForm.elements.serial_number.value = metadata.serialNumber || "";
   subscriptionForm.elements.plan.value = row.plan || "";
   subscriptionForm.elements.cost_amount.value = row.cost_amount ?? "";
   subscriptionForm.elements.cost_currency.value = row.cost_currency || "AUD";
-  subscriptionForm.elements.billing_cycle.value = row.billing_cycle || "monthly";
+  ensureSelectHasOption(subscriptionForm.elements.billing_cycle, row.billing_cycle || "1 year");
+  subscriptionForm.elements.billing_cycle.value = row.billing_cycle || "1 year";
   subscriptionForm.elements.renewal_date.value = row.renewal_date || "";
   subscriptionForm.elements.status.value = row.status || "active";
-  subscriptionForm.elements.notes.value = row.notes || "";
+  subscriptionForm.elements.notes.value = userNotes || "";
+  updateGeneratedNamePreview();
 
   subscriptionDialog.showModal();
 }
 
 function getFormPayload() {
   const formData = new FormData(subscriptionForm);
-  const vendorName = (formData.get("vendor_name") || "").toString().trim();
+  const customerCompanyName = (formData.get("customer_company_name") || "").toString().trim();
+  const equipmentName = (formData.get("equipment_name") || "").toString().trim();
+  const serialNumber = (formData.get("serial_number") || "").toString().trim();
 
-  if (!vendorName) {
-    throw new Error("Vendor name is required.");
+  if (!customerCompanyName && !equipmentName && !serialNumber) {
+    throw new Error("Enter at least a customer company, equipment/device, or serial number.");
   }
 
   const costAmountRaw = (formData.get("cost_amount") || "").toString().trim();
+  const metadata = {
+    customerCompanyName,
+    contactName: (formData.get("contact_name") || "").toString().trim(),
+    contactEmail: (formData.get("contact_email") || "").toString().trim(),
+    contactPhone: (formData.get("contact_phone") || "").toString().trim(),
+    equipmentName,
+    serialNumber,
+  };
+  const notes = (formData.get("notes") || "").toString();
 
   return {
-    vendor_name: vendorName,
-    product_name: (formData.get("product_name") || "").toString().trim() || null,
+    vendor_name: customerCompanyName || null,
+    product_name: equipmentName || null,
+    serial_number: serialNumber || null,
+    customer_company_name: customerCompanyName || null,
+    contact_name: metadata.contactName || null,
+    contact_email: metadata.contactEmail || null,
+    contact_phone: metadata.contactPhone || null,
+    equipment_name: equipmentName || null,
+    subscription_metadata: metadata,
     plan: (formData.get("plan") || "").toString().trim() || null,
     cost_amount: costAmountRaw ? Number(costAmountRaw) : null,
     cost_currency: (formData.get("cost_currency") || "AUD").toString().trim() || "AUD",
-    billing_cycle: (formData.get("billing_cycle") || "monthly").toString().trim() || "monthly",
+    billing_cycle: (formData.get("billing_cycle") || "1 year").toString().trim() || "1 year",
     renewal_date: (formData.get("renewal_date") || "").toString() || null,
     status: (formData.get("status") || "active").toString(),
-    notes: (formData.get("notes") || "").toString().trim() || null,
+    notes: buildNotesWithMetadata(notes, metadata),
   };
+}
+
+function toLegacyPayload(payload) {
+  return {
+    vendor_name: payload.vendor_name,
+    product_name: payload.product_name,
+    plan: payload.plan,
+    cost_amount: payload.cost_amount,
+    cost_currency: payload.cost_currency,
+    billing_cycle: payload.billing_cycle,
+    renewal_date: payload.renewal_date,
+    status: payload.status,
+    notes: payload.notes,
+  };
+}
+
+function ensureSelectHasOption(selectElement, value) {
+  if (!value) {
+    return;
+  }
+
+  const hasOption = Array.from(selectElement.options).some((option) => option.value === value);
+
+  if (!hasOption) {
+    const option = document.createElement("option");
+    option.value = value;
+    option.textContent = value;
+    selectElement.appendChild(option);
+  }
+}
+
+function updateGeneratedNamePreview() {
+  if (!generatedNamePreview) {
+    return;
+  }
+
+  const metadata = {
+    customerCompanyName: subscriptionForm.elements.customer_company_name?.value || "",
+    equipmentName: subscriptionForm.elements.equipment_name?.value || "",
+    serialNumber: subscriptionForm.elements.serial_number?.value || "",
+  };
+
+  generatedNamePreview.value = generateSubscriptionDisplayName(metadata, {});
 }
 
 async function saveSubscription(event) {
@@ -671,7 +853,11 @@ async function saveSubscription(event) {
   saveSubscriptionButton.disabled = true;
 
   if (editingSubscriptionId) {
-    const { error } = await supabase.from("subscriptions").update(payload).eq("id", editingSubscriptionId);
+    let { error } = await supabase.from("subscriptions").update(payload).eq("id", editingSubscriptionId);
+
+    if (error && error.message?.toLowerCase().includes("column")) {
+      ({ error } = await supabase.from("subscriptions").update(toLegacyPayload(payload)).eq("id", editingSubscriptionId));
+    }
 
     if (error) {
       formError.textContent = `Unable to save: ${error.message}`;
@@ -697,7 +883,13 @@ async function saveSubscription(event) {
       created_by: data.user.id,
     };
 
-    const { error } = await supabase.from("subscriptions").insert(insertPayload);
+    let { error } = await supabase.from("subscriptions").insert(insertPayload);
+
+    if (error && error.message?.toLowerCase().includes("column")) {
+      const { serial_number, customer_company_name, contact_name, contact_email, contact_phone, equipment_name, subscription_metadata, ...legacyInsertPayload } =
+        insertPayload;
+      ({ error } = await supabase.from("subscriptions").insert(legacyInsertPayload));
+    }
 
     if (error) {
       formError.textContent = `Unable to save: ${error.message}`;
@@ -728,8 +920,8 @@ async function deleteSubscription(id) {
   }
 
   const row = subscriptions.find((subscription) => subscription.id === id);
-  const vendor = row?.vendor_name || "this vendor";
-  const confirmed = window.confirm(`Delete subscription for ${vendor}?`);
+  const displayName = row ? formatSubscriptionName(row) : "this subscription";
+  const confirmed = window.confirm(`Delete ${displayName}?`);
 
   if (!confirmed) {
     return;
@@ -1141,6 +1333,9 @@ newSubscriptionCta.addEventListener("click", () => {
 document.querySelector(".sidebar-nav").addEventListener("click", handleNavClick);
 subscriptionsBody.addEventListener("click", handleTableClick);
 subscriptionForm.addEventListener("submit", saveSubscription);
+["customer_company_name", "equipment_name", "serial_number"].forEach((fieldName) => {
+  subscriptionForm.elements[fieldName]?.addEventListener("input", updateGeneratedNamePreview);
+});
 cancelSubscriptionButton.addEventListener("click", () => subscriptionDialog.close());
 inviteForm.addEventListener("submit", grantAccess);
 invitesBody.addEventListener("click", handleInvitesClick);
