@@ -40,6 +40,21 @@ Create a table named `public.subscriptions` with these columns:
 - `created_at` (timestamptz)
 - `updated_at` (timestamptz)
 
+Create a second table named `public.subscription_renewals` to preserve renewal history separately from the base subscription:
+
+- `id` (uuid, primary key)
+- `subscription_id` (uuid, references `public.subscriptions.id`)
+- `renewal_start_date` (date, required)
+- `renewal_end_date` (date, required)
+- `billing_cycle` (text, optional)
+- `renewal_outcome` (text, default `pending`)
+- `status` (text, optional)
+- `notes` (text, optional)
+- `created_at` (timestamptz)
+- `updated_at` (timestamptz)
+
+The UI treats `public.subscriptions` as parent/master records and `public.subscription_renewals` as child term events. Existing deployments without the renewals table still load subscription data; renewals are simply unavailable until the table is created.
+
 Legacy columns such as `vendor_name`, `cost_amount`, `cost_currency`, or `renewal_date` can remain in older databases for backwards compatibility, but the current UI no longer writes or displays vendor/cost and uses **start date** wording.
 
 Enable RLS and add policies so authenticated users can read and write rows needed by this app (select, insert, update, delete).

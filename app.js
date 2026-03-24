@@ -56,13 +56,29 @@ const saveSubscriptionButton = document.getElementById("save-subscription-btn");
 const cancelSubscriptionButton = document.getElementById("cancel-subscription-btn");
 const generatedNamePreview = document.getElementById("generated-display-name");
 const formCalculatedStatus = document.getElementById("form-calculated-status");
+const renewalDialog = document.getElementById("renewal-dialog");
+const renewalForm = document.getElementById("renewal-form");
+const renewalTargetName = document.getElementById("renewal-target-name");
+const renewalFormError = document.getElementById("renewal-form-error");
+const renewalCalculatedStatus = document.getElementById("renewal-calculated-status");
+const saveRenewalButton = document.getElementById("save-renewal-btn");
+const cancelRenewalButton = document.getElementById("cancel-renewal-btn");
+const detailDialog = document.getElementById("subscription-detail-dialog");
+const closeDetailButton = document.getElementById("close-detail-btn");
+const detailTitle = document.getElementById("detail-title");
+const detailMetadataList = document.getElementById("detail-metadata-list");
+const detailCurrentTermList = document.getElementById("detail-current-term-list");
+const detailRenewalHistory = document.getElementById("detail-renewal-history");
 
 let currentUser = null;
 let currentUserRole = null;
 let subscriptions = [];
+let renewalsBySubscription = new Map();
 let editingSubscriptionId = null;
+let renewingSubscriptionId = null;
 let subscriptionModalMode = "create";
 let isSubmittingForm = false;
+let isSubmittingRenewalForm = false;
 let loadingSubscriptions = false;
 let activeView = "dashboard";
 
@@ -145,12 +161,71 @@ function formatDate(dateString) {
   return parsed.toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" });
 }
 
+function getRenewalsForSubscription(subscriptionId) {
+  return renewalsBySubscription.get(subscriptionId) || [];
+}
+
+function getLegacyTermFromSubscription(row = {}) {
+  const startDate = row.start_date || row.renewal_date || null;
+  if (!startDate) {
+    return null;
+  }
+
+  return {
+    id: `legacy-${row.id || "row"}`,
+    subscription_id: row.id || null,
+    renewal_start_date: startDate,
+    renewal_end_date: row.end_date || calculateSubscriptionEndDate(row) || null,
+    billing_cycle: row.billing_cycle || null,
+    renewal_outcome: normalizeRenewalOutcome(row.renewal_outcome),
+    notes: getDisplayNotes(row) || null,
+    created_at: row.updated_at || row.created_at || null,
+    source: "legacy-subscription",
+  };
+}
+
+function sortRenewalTerms(terms = []) {
+  return [...terms].sort((a, b) => {
+    const aStart = new Date(a.renewal_start_date || 0).getTime();
+    const bStart = new Date(b.renewal_start_date || 0).getTime();
+    if (aStart !== bStart) {
+      return aStart - bStart;
+    }
+
+    return new Date(a.created_at || 0).getTime() - new Date(b.created_at || 0).getTime();
+  });
+}
+
+function getRenewalTimeline(row = {}) {
+  const childRenewals = getRenewalsForSubscription(row.id);
+  const timeline = childRenewals.length ? childRenewals : [];
+  const hasChildTerm = childRenewals.length > 0;
+  const legacyTerm = getLegacyTermFromSubscription(row);
+
+  if (!hasChildTerm && legacyTerm) {
+    timeline.push(legacyTerm);
+  }
+
+  return sortRenewalTerms(timeline);
+}
+
+function getCurrentTerm(row = {}) {
+  const timeline = getRenewalTimeline(row);
+  if (!timeline.length) {
+    return null;
+  }
+
+  return timeline[timeline.length - 1];
+}
+
 function getStartDateValue(row = {}) {
-  return row.start_date || row.renewal_date || null;
+  const term = getCurrentTerm(row);
+  return term?.renewal_start_date || row.start_date || row.renewal_date || null;
 }
 
 function getEndDateValue(row = {}) {
-  return calculateSubscriptionEndDate(row) || row.end_date || null;
+  const term = getCurrentTerm(row);
+  return term?.renewal_end_date || row.end_date || calculateSubscriptionEndDate(row) || null;
 }
 
 function normalizeRenewalOutcome(value) {
@@ -387,9 +462,10 @@ function subtractMonthsClamped(dateInput, monthsToSubtract) {
 }
 
 function calculateSubscriptionStatus(row, today = new Date()) {
+  const currentTerm = getCurrentTerm(row);
   const legacyStatus = (row.status || "unknown").toString().trim().toLowerCase() || "unknown";
-  const outcome = normalizeRenewalOutcome(row.renewal_outcome);
-  const endDate = parseDateStartOfDay(getEndDateValue(row));
+  const outcome = normalizeRenewalOutcome(currentTerm?.renewal_outcome || row.renewal_outcome);
+  const endDate = parseDateStartOfDay(currentTerm?.renewal_end_date || getEndDateValue(row));
   const normalizedToday = parseDateStartOfDay(today) || new Date();
   normalizedToday.setHours(0, 0, 0, 0);
 
@@ -599,15 +675,13 @@ function renderSubscriptions(rows) {
 
     const { canEdit, canDelete } = getCurrentPermissions();
 
-    if (canEdit || !canDelete) {
-      const viewButton = document.createElement("button");
-      viewButton.type = "button";
-      viewButton.className = "secondary table-action";
-      viewButton.dataset.action = "view";
-      viewButton.dataset.id = row.id;
-      viewButton.textContent = canEdit ? "View" : "Details";
-      actions.appendChild(viewButton);
-    }
+    const viewButton = document.createElement("button");
+    viewButton.type = "button";
+    viewButton.className = "secondary table-action";
+    viewButton.dataset.action = "view";
+    viewButton.dataset.id = row.id;
+    viewButton.textContent = "View";
+    actions.appendChild(viewButton);
 
     if (canEdit) {
       const editButton = document.createElement("button");
@@ -617,6 +691,14 @@ function renderSubscriptions(rows) {
       editButton.dataset.id = row.id;
       editButton.textContent = "Edit";
       actions.appendChild(editButton);
+
+      const renewButton = document.createElement("button");
+      renewButton.type = "button";
+      renewButton.className = "secondary table-action";
+      renewButton.dataset.action = "renew";
+      renewButton.dataset.id = row.id;
+      renewButton.textContent = "Renew";
+      actions.appendChild(renewButton);
     }
 
     if (canDelete) {
@@ -691,6 +773,7 @@ function setBusyState(isBusy) {
 
 function clearSubscriptions() {
   subscriptions = [];
+  renewalsBySubscription = new Map();
   populateFilterOptions();
   subscriptionsBody.innerHTML = "";
   emptyState.hidden = true;
@@ -812,6 +895,57 @@ async function loadUserManagement() {
   setUserManagementStatus("User management loaded.");
 }
 
+function buildRenewalsMap(rows = []) {
+  const grouped = new Map();
+  rows.forEach((row) => {
+    const subscriptionId = row.subscription_id;
+    if (!subscriptionId) {
+      return;
+    }
+
+    const renewalRecord = {
+      ...row,
+      renewal_start_date: row.renewal_start_date || row.start_date || null,
+      renewal_end_date: row.renewal_end_date || row.end_date || null,
+      renewal_outcome: normalizeRenewalOutcome(row.renewal_outcome || row.outcome),
+    };
+
+    if (!grouped.has(subscriptionId)) {
+      grouped.set(subscriptionId, []);
+    }
+
+    grouped.get(subscriptionId).push(renewalRecord);
+  });
+
+  grouped.forEach((terms, subscriptionId) => {
+    grouped.set(subscriptionId, sortRenewalTerms(terms));
+  });
+
+  return grouped;
+}
+
+async function loadRenewals() {
+  const { data, error } = await supabase
+    .from("subscription_renewals")
+    .select("*")
+    .order("renewal_start_date", { ascending: true, nullsFirst: false });
+
+  if (error) {
+    const normalizedMessage = (error.message || "").toLowerCase();
+    const isMissingTable = normalizedMessage.includes("does not exist") || normalizedMessage.includes("relation");
+    const isMissingColumn = normalizedMessage.includes("column");
+
+    if (isMissingTable || isMissingColumn) {
+      renewalsBySubscription = new Map();
+      return;
+    }
+
+    throw error;
+  }
+
+  renewalsBySubscription = buildRenewalsMap(data || []);
+}
+
 async function loadSubscriptions() {
   if (!currentUser || !currentUserRole) {
     clearSubscriptions();
@@ -847,11 +981,20 @@ async function loadSubscriptions() {
   }
 
   subscriptions = data || [];
+  try {
+    await loadRenewals();
+  } catch (renewalsError) {
+    console.error("loadRenewals error", renewalsError);
+    renewalsBySubscription = new Map();
+    setSubscriptionStatus(`Subscriptions loaded, but renewals are unavailable: ${renewalsError.message}`, true);
+  }
   populateFilterOptions();
   refreshVisibleSubscriptions();
   renderRenewalsPanel();
   updateDashboardMetrics();
-  setSubscriptionStatus("Subscriptions loaded.");
+  if (!subscriptionStatus.textContent || !subscriptionStatus.textContent.includes("unavailable")) {
+    setSubscriptionStatus("Subscriptions loaded.");
+  }
 }
 
 function openAddForm() {
@@ -893,9 +1036,7 @@ function fillSubscriptionForm(row = {}) {
   subscriptionForm.elements.plan.value = row.plan || "";
   ensureSelectHasOption(subscriptionForm.elements.billing_cycle, row.billing_cycle || "1 year");
   subscriptionForm.elements.billing_cycle.value = row.billing_cycle || "1 year";
-  subscriptionForm.elements.start_date.value = getStartDateValue(row) || "";
-  ensureSelectHasOption(subscriptionForm.elements.renewal_outcome, normalizeRenewalOutcome(row.renewal_outcome));
-  subscriptionForm.elements.renewal_outcome.value = normalizeRenewalOutcome(row.renewal_outcome);
+  subscriptionForm.elements.start_date.value = row.start_date || row.renewal_date || "";
   if (formCalculatedStatus) {
     formCalculatedStatus.value = toStatusLabel(calculateSubscriptionStatus(row));
   }
@@ -920,7 +1061,6 @@ function openSubscriptionModal(mode, row = null) {
   subscriptionForm.reset();
   ensureSelectHasOption(subscriptionForm.elements.billing_cycle, "1 year");
   subscriptionForm.elements.billing_cycle.value = "1 year";
-  subscriptionForm.elements.renewal_outcome.value = "pending";
 
   if (row) {
     fillSubscriptionForm(row);
@@ -972,7 +1112,7 @@ function getFormPayload() {
     billing_cycle: (formData.get("billing_cycle") || "1 year").toString().trim() || "1 year",
     start_date: (formData.get("start_date") || "").toString() || null,
     end_date: calculatedEndDate,
-    renewal_outcome: normalizeRenewalOutcome(formData.get("renewal_outcome")),
+    renewal_outcome: "pending",
     status: "unknown",
     notes: buildNotesWithMetadata(notes, metadata),
   };
@@ -1034,7 +1174,7 @@ function updateCalculatedStatusPreview() {
 
   const previewPayload = {
     end_date: calculatedEndDate,
-    renewal_outcome: normalizeRenewalOutcome(subscriptionForm.elements.renewal_outcome?.value),
+    renewal_outcome: "pending",
     status: "unknown",
   };
 
@@ -1052,6 +1192,143 @@ function updateCalculatedEndDatePreview() {
     billing_cycle: subscriptionForm.elements.billing_cycle?.value || null,
   });
   calculatedEndDateInput.value = calculatedEndDate || "";
+}
+
+function renderDetailList(container, rows) {
+  container.innerHTML = "";
+  rows.forEach(([label, value]) => {
+    const dt = document.createElement("dt");
+    dt.textContent = label;
+    const dd = document.createElement("dd");
+    dd.textContent = value || "—";
+    container.appendChild(dt);
+    container.appendChild(dd);
+  });
+}
+
+function openSubscriptionDetail(row) {
+  const metadata = getSubscriptionMetadata(row);
+  const currentTerm = getCurrentTerm(row);
+  const history = getRenewalTimeline(row);
+
+  detailTitle.textContent = formatSubscriptionName(row);
+  renderDetailList(detailMetadataList, [
+    ["Customer", metadata.customerCompanyName || "—"],
+    ["Contact", metadata.contactName || "—"],
+    ["Email", metadata.contactEmail || "—"],
+    ["Phone", metadata.contactPhone || "—"],
+    ["Equipment", metadata.equipmentName || "—"],
+    ["Serial", metadata.serialNumber || "—"],
+    ["Plan", row.plan || "—"],
+    ["Billing frequency", row.billing_cycle || "—"],
+    ["Base start date", row.start_date || row.renewal_date || "—"],
+    ["Notes", getDisplayNotes(row) || "—"],
+  ]);
+
+  renderDetailList(detailCurrentTermList, [
+    ["Status", toStatusLabel(calculateSubscriptionStatus(row))],
+    ["Term start", formatDate(currentTerm?.renewal_start_date) || "—"],
+    ["Term end", formatDate(currentTerm?.renewal_end_date) || "—"],
+    ["Outcome", toStatusLabel(currentTerm?.renewal_outcome || "pending")],
+  ]);
+
+  detailRenewalHistory.innerHTML = "";
+  if (!history.length) {
+    detailRenewalHistory.innerHTML = '<article class="renewal-item"><p>No renewal history yet.</p></article>';
+  } else {
+    history.forEach((term, index) => {
+      const item = document.createElement("article");
+      item.className = "renewal-item";
+      item.innerHTML = `<p><strong>Term ${index + 1}</strong> • ${toStatusLabel(term.renewal_outcome || "pending")}</p>
+      <p>${formatDate(term.renewal_start_date)} → ${formatDate(term.renewal_end_date)}</p>
+      <p>${term.notes || "No notes"}</p>`;
+      detailRenewalHistory.appendChild(item);
+    });
+  }
+
+  detailDialog.showModal();
+}
+
+function updateRenewalPreview() {
+  const startDate = renewalForm.elements.renewal_start_date?.value || null;
+  const billingCycle = renewalForm.elements.billing_cycle?.value || null;
+  const outcome = normalizeRenewalOutcome(renewalForm.elements.renewal_outcome?.value);
+  const endDate = calculateSubscriptionEndDate({ start_date: startDate, billing_cycle: billingCycle });
+
+  renewalForm.elements.renewal_end_date.value = endDate || "";
+  renewalCalculatedStatus.value = toStatusLabel(calculateSubscriptionStatus({ end_date: endDate, renewal_outcome: outcome }));
+}
+
+function openRenewalModal(row) {
+  const { canEdit } = getCurrentPermissions();
+  if (!canEdit) {
+    setSubscriptionStatus("Your role is not allowed to renew subscriptions.", true);
+    return;
+  }
+
+  renewingSubscriptionId = row?.id || null;
+  renewalTargetName.textContent = formatSubscriptionName(row);
+  renewalFormError.textContent = "";
+  renewalForm.reset();
+  renewalForm.elements.billing_cycle.value = row?.billing_cycle || "1 year";
+  renewalForm.elements.renewal_outcome.value = "pending";
+  renewalForm.elements.renewal_start_date.value = getEndDateValue(row) || "";
+  updateRenewalPreview();
+  renewalDialog.showModal();
+}
+
+async function saveRenewal(event) {
+  event.preventDefault();
+
+  if (isSubmittingRenewalForm || !renewingSubscriptionId) {
+    return;
+  }
+
+  const { canEdit } = getCurrentPermissions();
+  if (!canEdit) {
+    renewalFormError.textContent = "Your role is not allowed to renew subscriptions.";
+    return;
+  }
+
+  const startDate = (renewalForm.elements.renewal_start_date.value || "").trim();
+  const billingCycle = (renewalForm.elements.billing_cycle.value || "").trim();
+  const outcome = normalizeRenewalOutcome(renewalForm.elements.renewal_outcome.value);
+  const notes = (renewalForm.elements.notes.value || "").trim() || null;
+  const endDate = calculateSubscriptionEndDate({ start_date: startDate, billing_cycle: billingCycle });
+
+  if (!startDate || !billingCycle || !endDate) {
+    renewalFormError.textContent = "Provide renewal start date and billing frequency.";
+    return;
+  }
+
+  isSubmittingRenewalForm = true;
+  saveRenewalButton.disabled = true;
+  renewalFormError.textContent = "";
+
+  const renewalPayload = {
+    subscription_id: renewingSubscriptionId,
+    renewal_start_date: startDate,
+    renewal_end_date: endDate,
+    billing_cycle: billingCycle,
+    renewal_outcome: outcome,
+    status: calculateSubscriptionStatus({ end_date: endDate, renewal_outcome: outcome }),
+    notes,
+  };
+
+  const { error } = await supabase.from("subscription_renewals").insert(renewalPayload);
+
+  isSubmittingRenewalForm = false;
+  saveRenewalButton.disabled = false;
+
+  if (error) {
+    renewalFormError.textContent = `Unable to save renewal: ${error.message}`;
+    return;
+  }
+
+  renewalDialog.close();
+  setSubscriptionStatus("Renewal saved.");
+  renewingSubscriptionId = null;
+  await loadSubscriptions();
 }
 
 async function saveSubscription(event) {
@@ -1081,6 +1358,11 @@ async function saveSubscription(event) {
   } catch (error) {
     formError.textContent = error.message;
     return;
+  }
+
+  if (editingSubscriptionId) {
+    const existingSubscription = subscriptions.find((subscription) => subscription.id === editingSubscriptionId);
+    payload.renewal_outcome = normalizeRenewalOutcome(existingSubscription?.renewal_outcome || payload.renewal_outcome);
   }
 
   isSubmittingForm = true;
@@ -1198,7 +1480,11 @@ function handleTableClick(event) {
   }
 
   if (action === "view" && row) {
-    openSubscriptionModal("view", row);
+    openSubscriptionDetail(row);
+  }
+
+  if (action === "renew" && row) {
+    openRenewalModal(row);
   }
 
   if (action === "delete") {
@@ -1570,13 +1856,20 @@ subscriptionForm.addEventListener("submit", saveSubscription);
 ["customer_company_name", "equipment_name", "serial_number"].forEach((fieldName) => {
   subscriptionForm.elements[fieldName]?.addEventListener("input", updateGeneratedNamePreview);
 });
-["start_date", "billing_cycle", "renewal_outcome"].forEach((fieldName) => {
+["start_date", "billing_cycle"].forEach((fieldName) => {
   subscriptionForm.elements[fieldName]?.addEventListener("input", updateCalculatedStatusPreview);
   subscriptionForm.elements[fieldName]?.addEventListener("change", updateCalculatedStatusPreview);
   subscriptionForm.elements[fieldName]?.addEventListener("input", updateCalculatedEndDatePreview);
   subscriptionForm.elements[fieldName]?.addEventListener("change", updateCalculatedEndDatePreview);
 });
 cancelSubscriptionButton.addEventListener("click", () => subscriptionDialog.close());
+renewalForm.addEventListener("submit", saveRenewal);
+["renewal_start_date", "billing_cycle", "renewal_outcome"].forEach((fieldName) => {
+  renewalForm.elements[fieldName]?.addEventListener("input", updateRenewalPreview);
+  renewalForm.elements[fieldName]?.addEventListener("change", updateRenewalPreview);
+});
+cancelRenewalButton.addEventListener("click", () => renewalDialog.close());
+closeDetailButton.addEventListener("click", () => detailDialog.close());
 inviteForm.addEventListener("submit", grantAccess);
 invitesBody.addEventListener("click", handleInvitesClick);
 sendMagicLinkButton.addEventListener("click", sendMagicLink);
