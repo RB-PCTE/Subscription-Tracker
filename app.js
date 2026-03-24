@@ -30,7 +30,6 @@ const emptyStateCopy = document.getElementById("empty-state-copy");
 const searchInput = document.getElementById("search-input");
 const statusFilter = document.getElementById("status-filter");
 const frequencyFilter = document.getElementById("frequency-filter");
-const ownerFilter = document.getElementById("owner-filter");
 const sortControl = document.getElementById("sort-control");
 const subscriptionsBody = document.getElementById("subscriptions-body");
 const subscriptionStatus = document.getElementById("subscription-status");
@@ -62,6 +61,7 @@ let currentUser = null;
 let currentUserRole = null;
 let subscriptions = [];
 let editingSubscriptionId = null;
+let subscriptionModalMode = "create";
 let isSubmittingForm = false;
 let loadingSubscriptions = false;
 let activeView = "dashboard";
@@ -150,7 +150,7 @@ function getStartDateValue(row = {}) {
 }
 
 function getEndDateValue(row = {}) {
-  return row.end_date || null;
+  return calculateSubscriptionEndDate(row) || row.end_date || null;
 }
 
 function normalizeRenewalOutcome(value) {
@@ -272,10 +272,6 @@ function buildNotesWithMetadata(notes, metadata) {
   return cleanedNotes ? `${cleanedNotes}\n\n${metadataBlock}` : metadataBlock;
 }
 
-function formatOwner(row) {
-  return row.owner || row.owner_name || row.created_by || "Unassigned";
-}
-
 function toStatusLabel(value) {
   return (value || "Unknown")
     .toString()
@@ -297,6 +293,80 @@ function parseDateStartOfDay(dateInput) {
 
   parsed.setHours(0, 0, 0, 0);
   return parsed;
+}
+
+function addMonthsClamped(dateInput, monthsToAdd) {
+  const baseDate = parseDateStartOfDay(dateInput);
+  if (!baseDate || !Number.isFinite(monthsToAdd)) {
+    return null;
+  }
+
+  const targetYear = baseDate.getFullYear();
+  const targetMonthIndex = baseDate.getMonth() + monthsToAdd;
+  const targetDay = baseDate.getDate();
+  const firstOfTargetMonth = new Date(targetYear, targetMonthIndex, 1);
+  const lastDayOfTargetMonth = new Date(firstOfTargetMonth.getFullYear(), firstOfTargetMonth.getMonth() + 1, 0).getDate();
+  const clampedDay = Math.min(targetDay, lastDayOfTargetMonth);
+
+  return new Date(firstOfTargetMonth.getFullYear(), firstOfTargetMonth.getMonth(), clampedDay);
+}
+
+function toIsoDateString(dateValue) {
+  if (!(dateValue instanceof Date) || Number.isNaN(dateValue.getTime())) {
+    return null;
+  }
+
+  const year = dateValue.getFullYear();
+  const month = String(dateValue.getMonth() + 1).padStart(2, "0");
+  const day = String(dateValue.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+function parseBillingFrequencyToMonths(value) {
+  const normalized = (value || "").toString().trim().toLowerCase();
+  if (!normalized) {
+    return null;
+  }
+
+  const directMapping = {
+    monthly: 1,
+    quarter: 3,
+    quarterly: 3,
+    "half year": 6,
+    "half-year": 6,
+    semiannual: 6,
+    "semi-annual": 6,
+    annual: 12,
+    yearly: 12,
+  };
+
+  if (directMapping[normalized]) {
+    return directMapping[normalized];
+  }
+
+  const numericMatch = normalized.match(/^(\d+)\s*(month|months|year|years)$/);
+  if (!numericMatch) {
+    return null;
+  }
+
+  const amount = Number.parseInt(numericMatch[1], 10);
+  if (!Number.isFinite(amount) || amount <= 0) {
+    return null;
+  }
+
+  const unit = numericMatch[2];
+  return unit.startsWith("year") ? amount * 12 : amount;
+}
+
+function calculateSubscriptionEndDate(subscription = {}) {
+  const startDate = getStartDateValue(subscription);
+  const monthsToAdd = parseBillingFrequencyToMonths(subscription.billing_cycle);
+
+  if (!startDate || !monthsToAdd) {
+    return null;
+  }
+
+  return toIsoDateString(addMonthsClamped(startDate, monthsToAdd));
 }
 
 function subtractMonthsClamped(dateInput, monthsToSubtract) {
@@ -405,9 +475,6 @@ function getStartDateUrgency(row) {
 function populateFilterOptions() {
   const statuses = [...new Set(subscriptions.map((row) => calculateSubscriptionStatus(row)).filter(Boolean))].sort();
   const frequencies = [...new Set(subscriptions.map((row) => (row.billing_cycle || "unspecified").toLowerCase()).filter(Boolean))].sort();
-  const owners = [...new Set(subscriptions.map((row) => formatOwner(row)).filter(Boolean))].sort((a, b) =>
-    a.localeCompare(b)
-  );
 
   statusFilter.innerHTML = '<option value="all">All statuses</option>';
   statuses.forEach((status) => {
@@ -424,21 +491,12 @@ function populateFilterOptions() {
     option.textContent = toStatusLabel(frequency);
     frequencyFilter.appendChild(option);
   });
-
-  ownerFilter.innerHTML = '<option value="all">All owners</option>';
-  owners.forEach((owner) => {
-    const option = document.createElement("option");
-    option.value = owner;
-    option.textContent = owner;
-    ownerFilter.appendChild(option);
-  });
 }
 
 function getFilteredSubscriptions() {
   const query = searchInput.value.trim().toLowerCase();
   const selectedStatus = statusFilter.value;
   const selectedFrequency = frequencyFilter.value;
-  const selectedOwner = ownerFilter.value;
 
   const filtered = subscriptions.filter((row) => {
     const matchesSearch =
@@ -452,9 +510,7 @@ function getFilteredSubscriptions() {
     const matchesStatus = selectedStatus === "all" || calculateSubscriptionStatus(row) === selectedStatus;
     const matchesFrequency =
       selectedFrequency === "all" || (row.billing_cycle || "").toLowerCase() === selectedFrequency;
-    const matchesOwner = selectedOwner === "all" || formatOwner(row) === selectedOwner;
-
-    return matchesSearch && matchesStatus && matchesFrequency && matchesOwner;
+    return matchesSearch && matchesStatus && matchesFrequency;
   });
 
   const sorted = [...filtered];
@@ -484,8 +540,7 @@ function renderSubscriptions(rows) {
     const hasFilters =
       searchInput.value.trim().length > 0 ||
       statusFilter.value !== "all" ||
-      frequencyFilter.value !== "all" ||
-      ownerFilter.value !== "all";
+      frequencyFilter.value !== "all";
 
     emptyStateTitle.textContent = hasFilters ? "No matching subscriptions" : "No subscriptions yet";
     emptyStateCopy.textContent = hasFilters
@@ -514,10 +569,6 @@ function renderSubscriptions(rows) {
     const customerTd = document.createElement("td");
     customerTd.textContent = metadata.customerCompanyName || "—";
     tr.appendChild(customerTd);
-
-    const ownerTd = document.createElement("td");
-    ownerTd.textContent = formatOwner(row);
-    tr.appendChild(ownerTd);
 
     const cycleTd = document.createElement("td");
     cycleTd.textContent = row.billing_cycle || "—";
@@ -634,7 +685,6 @@ function setBusyState(isBusy) {
   searchInput.disabled = isBusy;
   statusFilter.disabled = isBusy;
   frequencyFilter.disabled = isBusy;
-  ownerFilter.disabled = isBusy;
   sortControl.disabled = isBusy;
   subscriptionsTableWrap?.setAttribute("aria-busy", isBusy ? "true" : "false");
 }
@@ -805,36 +855,32 @@ async function loadSubscriptions() {
 }
 
 function openAddForm() {
-  const { canAdd } = getCurrentPermissions();
-
-  if (!canAdd) {
-    setSubscriptionStatus("Your role does not allow adding subscriptions.", true);
-    return;
-  }
-
-  editingSubscriptionId = null;
-  formTitle.textContent = "Add subscription";
-  formError.textContent = "";
-  subscriptionForm.reset();
-  subscriptionForm.elements.billing_cycle.value = "1 year";
-  subscriptionForm.elements.renewal_outcome.value = "pending";
-  updateCalculatedStatusPreview();
-  updateGeneratedNamePreview();
-  subscriptionDialog.showModal();
+  openSubscriptionModal("create");
 }
 
-function openEditForm(row) {
-  const { canEdit } = getCurrentPermissions();
+function applySubscriptionModalMode(mode) {
+  subscriptionModalMode = mode;
+  const isReadOnly = mode === "view";
+  const isEditMode = mode === "edit";
 
-  if (!canEdit) {
-    setSubscriptionStatus("Your role does not allow editing subscriptions.", true);
-    return;
-  }
+  formTitle.textContent = isReadOnly ? "View subscription" : isEditMode ? "Edit subscription" : "Add subscription";
+  saveSubscriptionButton.hidden = isReadOnly;
+  saveSubscriptionButton.disabled = isReadOnly;
+  saveSubscriptionButton.textContent = isEditMode ? "Update" : "Save";
+  subscriptionForm.classList.toggle("is-readonly", isReadOnly);
 
-  editingSubscriptionId = row.id;
-  formTitle.textContent = "Edit subscription";
-  formError.textContent = "";
+  const formFields = subscriptionForm.querySelectorAll("input, select, textarea");
+  formFields.forEach((field) => {
+    if (["generated-display-name", "form-calculated-status", "calculated-end-date"].includes(field.id)) {
+      field.readOnly = true;
+      return;
+    }
 
+    field.disabled = isReadOnly;
+  });
+}
+
+function fillSubscriptionForm(row = {}) {
   const metadata = getSubscriptionMetadata(row);
   const userNotes = getDisplayNotes(row);
 
@@ -848,7 +894,6 @@ function openEditForm(row) {
   ensureSelectHasOption(subscriptionForm.elements.billing_cycle, row.billing_cycle || "1 year");
   subscriptionForm.elements.billing_cycle.value = row.billing_cycle || "1 year";
   subscriptionForm.elements.start_date.value = getStartDateValue(row) || "";
-  subscriptionForm.elements.end_date.value = getEndDateValue(row) || "";
   ensureSelectHasOption(subscriptionForm.elements.renewal_outcome, normalizeRenewalOutcome(row.renewal_outcome));
   subscriptionForm.elements.renewal_outcome.value = normalizeRenewalOutcome(row.renewal_outcome);
   if (formCalculatedStatus) {
@@ -856,7 +901,36 @@ function openEditForm(row) {
   }
   subscriptionForm.elements.notes.value = userNotes || "";
   updateCalculatedStatusPreview();
+  updateCalculatedEndDatePreview();
   updateGeneratedNamePreview();
+}
+
+function openSubscriptionModal(mode, row = null) {
+  const { canAdd, canEdit } = getCurrentPermissions();
+  const wantsCreate = mode === "create";
+  const wantsEdit = mode === "edit";
+
+  if ((wantsCreate && !canAdd) || (wantsEdit && !canEdit)) {
+    setSubscriptionStatus("Your role is not allowed to perform this action.", true);
+    return;
+  }
+
+  editingSubscriptionId = wantsEdit ? row?.id || null : null;
+  formError.textContent = "";
+  subscriptionForm.reset();
+  ensureSelectHasOption(subscriptionForm.elements.billing_cycle, "1 year");
+  subscriptionForm.elements.billing_cycle.value = "1 year";
+  subscriptionForm.elements.renewal_outcome.value = "pending";
+
+  if (row) {
+    fillSubscriptionForm(row);
+  } else {
+    updateCalculatedStatusPreview();
+    updateCalculatedEndDatePreview();
+    updateGeneratedNamePreview();
+  }
+
+  applySubscriptionModalMode(mode);
 
   subscriptionDialog.showModal();
 }
@@ -880,6 +954,10 @@ function getFormPayload() {
     serialNumber,
   };
   const notes = (formData.get("notes") || "").toString();
+  const calculatedEndDate = calculateSubscriptionEndDate({
+    start_date: (formData.get("start_date") || "").toString() || null,
+    billing_cycle: (formData.get("billing_cycle") || "").toString().trim() || null,
+  });
 
   const payload = {
     product_name: equipmentName || null,
@@ -893,7 +971,7 @@ function getFormPayload() {
     plan: (formData.get("plan") || "").toString().trim() || null,
     billing_cycle: (formData.get("billing_cycle") || "1 year").toString().trim() || "1 year",
     start_date: (formData.get("start_date") || "").toString() || null,
-    end_date: (formData.get("end_date") || "").toString() || null,
+    end_date: calculatedEndDate,
     renewal_outcome: normalizeRenewalOutcome(formData.get("renewal_outcome")),
     status: "unknown",
     notes: buildNotesWithMetadata(notes, metadata),
@@ -949,8 +1027,13 @@ function updateCalculatedStatusPreview() {
     return;
   }
 
+  const calculatedEndDate = calculateSubscriptionEndDate({
+    start_date: subscriptionForm.elements.start_date?.value || null,
+    billing_cycle: subscriptionForm.elements.billing_cycle?.value || null,
+  });
+
   const previewPayload = {
-    end_date: subscriptionForm.elements.end_date?.value || null,
+    end_date: calculatedEndDate,
     renewal_outcome: normalizeRenewalOutcome(subscriptionForm.elements.renewal_outcome?.value),
     status: "unknown",
   };
@@ -958,10 +1041,28 @@ function updateCalculatedStatusPreview() {
   formCalculatedStatus.value = toStatusLabel(calculateSubscriptionStatus(previewPayload));
 }
 
+function updateCalculatedEndDatePreview() {
+  const calculatedEndDateInput = subscriptionForm.elements.calculated_end_date;
+  if (!calculatedEndDateInput) {
+    return;
+  }
+
+  const calculatedEndDate = calculateSubscriptionEndDate({
+    start_date: subscriptionForm.elements.start_date?.value || null,
+    billing_cycle: subscriptionForm.elements.billing_cycle?.value || null,
+  });
+  calculatedEndDateInput.value = calculatedEndDate || "";
+}
+
 async function saveSubscription(event) {
   event.preventDefault();
 
   if (isSubmittingForm) {
+    return;
+  }
+
+  if (subscriptionModalMode === "view") {
+    formError.textContent = "View mode is read-only. Use Edit to update this subscription.";
     return;
   }
 
@@ -1093,11 +1194,11 @@ function handleTableClick(event) {
   const row = subscriptions.find((subscription) => subscription.id === id);
 
   if (action === "edit" && row) {
-    openEditForm(row);
+    openSubscriptionModal("edit", row);
   }
 
   if (action === "view" && row) {
-    openEditForm(row);
+    openSubscriptionModal("view", row);
   }
 
   if (action === "delete") {
@@ -1456,13 +1557,12 @@ function handleNavClick(event) {
 searchInput.addEventListener("input", refreshVisibleSubscriptions);
 statusFilter.addEventListener("change", refreshVisibleSubscriptions);
 frequencyFilter.addEventListener("change", refreshVisibleSubscriptions);
-ownerFilter.addEventListener("change", refreshVisibleSubscriptions);
 sortControl.addEventListener("change", refreshVisibleSubscriptions);
 addSubscriptionButton.addEventListener("click", openAddForm);
 emptyAddButton.addEventListener("click", openAddForm);
 newSubscriptionCta.addEventListener("click", () => {
   setActiveView("subscriptions");
-  openAddForm();
+  openSubscriptionModal("create");
 });
 document.querySelector(".sidebar-nav").addEventListener("click", handleNavClick);
 subscriptionsBody.addEventListener("click", handleTableClick);
@@ -1470,9 +1570,11 @@ subscriptionForm.addEventListener("submit", saveSubscription);
 ["customer_company_name", "equipment_name", "serial_number"].forEach((fieldName) => {
   subscriptionForm.elements[fieldName]?.addEventListener("input", updateGeneratedNamePreview);
 });
-["end_date", "renewal_outcome"].forEach((fieldName) => {
+["start_date", "billing_cycle", "renewal_outcome"].forEach((fieldName) => {
   subscriptionForm.elements[fieldName]?.addEventListener("input", updateCalculatedStatusPreview);
   subscriptionForm.elements[fieldName]?.addEventListener("change", updateCalculatedStatusPreview);
+  subscriptionForm.elements[fieldName]?.addEventListener("input", updateCalculatedEndDatePreview);
+  subscriptionForm.elements[fieldName]?.addEventListener("change", updateCalculatedEndDatePreview);
 });
 cancelSubscriptionButton.addEventListener("click", () => subscriptionDialog.close());
 inviteForm.addEventListener("submit", grantAccess);

@@ -265,7 +265,7 @@ h3 {
 
 .subscriptions-toolbar {
   display: grid;
-  grid-template-columns: minmax(220px, 2fr) repeat(4, minmax(160px, 1fr));
+  grid-template-columns: minmax(220px, 2fr) repeat(3, minmax(160px, 1fr));
   gap: var(--space-3);
   align-items: end;
   background: #f8fafc;
@@ -386,7 +386,23 @@ td {
 
 .subscriptions-table th:nth-child(2),
 .subscriptions-table td:nth-child(2) {
-  width: 14%;
+  width: 15%;
+}
+
+.subscriptions-table th:nth-child(3),
+.subscriptions-table td:nth-child(3),
+.subscriptions-table th:nth-child(4),
+.subscriptions-table td:nth-child(4),
+.subscriptions-table th:nth-child(5),
+.subscriptions-table td:nth-child(5),
+.subscriptions-table th:nth-child(6),
+.subscriptions-table td:nth-child(6) {
+  width: 10%;
+}
+
+.subscriptions-table th:nth-child(7),
+.subscriptions-table td:nth-child(7) {
+  width: 13%;
 }
 
 .amount-cell {
@@ -579,6 +595,13 @@ dialog::backdrop {
 #subscription-form select {
   width: 100%;
   min-width: 0;
+}
+
+#subscription-form.is-readonly input:disabled,
+#subscription-form.is-readonly select:disabled,
+#subscription-form.is-readonly textarea:disabled {
+  background: #f8fafc;
+  color: #334155;
 }
 
 .dialog-actions {

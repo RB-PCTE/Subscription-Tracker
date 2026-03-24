@@ -140,13 +140,6 @@
                 </select>
               </label>
 
-              <label class="toolbar-field" for="owner-filter">
-                <span>Owner</span>
-                <select id="owner-filter" aria-label="Filter by owner">
-                  <option value="all">All owners</option>
-                </select>
-              </label>
-
               <label class="toolbar-field" for="sort-control">
                 <span>Sort</span>
                 <select id="sort-control" aria-label="Sort subscriptions">
@@ -166,7 +159,6 @@
                   <tr>
                     <th>Subscription name</th>
                     <th>Customer</th>
-                    <th>Owner</th>
                     <th>Billing frequency</th>
                     <th>Start date</th>
                     <th>End date</th>
@@ -331,8 +323,8 @@
           </label>
 
           <label>
-            End date
-            <input id="end-date" name="end_date" type="date" />
+            End date (calculated)
+            <input id="calculated-end-date" name="calculated_end_date" type="date" readonly aria-readonly="true" />
           </label>
 
           <label>
