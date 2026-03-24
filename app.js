@@ -175,7 +175,7 @@ function getLegacyTermFromSubscription(row = {}) {
     id: `legacy-${row.id || "row"}`,
     subscription_id: row.id || null,
     renewal_start_date: startDate,
-    renewal_end_date: row.end_date || calculateSubscriptionEndDate(row) || null,
+    renewal_end_date: row.end_date || calculateEndDateFromValues(startDate, row.billing_cycle) || null,
     billing_cycle: row.billing_cycle || null,
     renewal_outcome: normalizeRenewalOutcome(row.renewal_outcome),
     notes: getDisplayNotes(row) || null,
@@ -434,9 +434,13 @@ function parseBillingFrequencyToMonths(value) {
 }
 
 function calculateSubscriptionEndDate(subscription = {}) {
-  const startDate = getStartDateValue(subscription);
-  const monthsToAdd = parseBillingFrequencyToMonths(subscription.billing_cycle);
+  const startDate = subscription.start_date || subscription.renewal_date || subscription.renewal_start_date || null;
+  return calculateEndDateFromValues(startDate, subscription.billing_cycle);
+}
 
+function calculateEndDateFromValues(startDate, billingCycle) {
+  console.debug("calculateEndDateFromValues", { startDate, billingCycle });
+  const monthsToAdd = parseBillingFrequencyToMonths(billingCycle);
   if (!startDate || !monthsToAdd) {
     return null;
   }
@@ -462,6 +466,7 @@ function subtractMonthsClamped(dateInput, monthsToSubtract) {
 }
 
 function calculateSubscriptionStatus(row, today = new Date()) {
+  console.debug("calculateSubscriptionStatus", { id: row?.id, today: toIsoDateString(today) });
   const currentTerm = getCurrentTerm(row);
   const legacyStatus = (row.status || "unknown").toString().trim().toLowerCase() || "unknown";
   const outcome = normalizeRenewalOutcome(currentTerm?.renewal_outcome || row.renewal_outcome);
@@ -515,7 +520,7 @@ function calculateSubscriptionStatus(row, today = new Date()) {
 }
 
 function getStartDateUrgency(row) {
-  const status = calculateSubscriptionStatus(row);
+  const status = safeCalculateSubscriptionStatus(row);
   if (status === "final warning") {
     return "renewal-urgent";
   }
@@ -524,7 +529,7 @@ function getStartDateUrgency(row) {
     return "renewal-warning";
   }
 
-  const endDate = getEndDateValue(row);
+  const endDate = safeGetEndDateValue(row);
   if (!endDate) {
     return "renewal-none";
   }
@@ -548,8 +553,26 @@ function getStartDateUrgency(row) {
   return "renewal-normal";
 }
 
+function safeCalculateSubscriptionStatus(row) {
+  try {
+    return calculateSubscriptionStatus(row);
+  } catch (error) {
+    console.error("calculateSubscriptionStatus failed", { error, row });
+    return ((row?.status || "unknown").toString().trim().toLowerCase() || "unknown");
+  }
+}
+
+function safeGetEndDateValue(row) {
+  try {
+    return getEndDateValue(row);
+  } catch (error) {
+    console.error("getEndDateValue failed", { error, row });
+    return row?.end_date || null;
+  }
+}
+
 function populateFilterOptions() {
-  const statuses = [...new Set(subscriptions.map((row) => calculateSubscriptionStatus(row)).filter(Boolean))].sort();
+  const statuses = [...new Set(subscriptions.map((row) => safeCalculateSubscriptionStatus(row)).filter(Boolean))].sort();
   const frequencies = [...new Set(subscriptions.map((row) => (row.billing_cycle || "unspecified").toLowerCase()).filter(Boolean))].sort();
 
   statusFilter.innerHTML = '<option value="all">All statuses</option>';
@@ -583,7 +606,7 @@ function getFilteredSubscriptions() {
       (getSubscriptionMetadata(row).serialNumber || "").toLowerCase().includes(query) ||
       (row.plan || "").toLowerCase().includes(query);
 
-    const matchesStatus = selectedStatus === "all" || calculateSubscriptionStatus(row) === selectedStatus;
+    const matchesStatus = selectedStatus === "all" || safeCalculateSubscriptionStatus(row) === selectedStatus;
     const matchesFrequency =
       selectedFrequency === "all" || (row.billing_cycle || "").toLowerCase() === selectedFrequency;
     return matchesSearch && matchesStatus && matchesFrequency;
@@ -595,7 +618,7 @@ function getFilteredSubscriptions() {
       sorted.sort((a, b) => new Date(getStartDateValue(b) || 0).getTime() - new Date(getStartDateValue(a) || 0).getTime());
       break;
     case "status-asc":
-      sorted.sort((a, b) => toStatusLabel(calculateSubscriptionStatus(a)).localeCompare(toStatusLabel(calculateSubscriptionStatus(b))));
+      sorted.sort((a, b) => toStatusLabel(safeCalculateSubscriptionStatus(a)).localeCompare(toStatusLabel(safeCalculateSubscriptionStatus(b))));
       break;
     case "name-asc":
       sorted.sort((a, b) => formatSubscriptionName(a).localeCompare(formatSubscriptionName(b)));
@@ -609,6 +632,7 @@ function getFilteredSubscriptions() {
 }
 
 function renderSubscriptions(rows) {
+  console.debug("renderSubscriptions", { totalRows: rows?.length || 0, storedSubscriptions: subscriptions.length });
   subscriptionsBody.innerHTML = "";
   subscriptionsSubtitle.textContent = `${subscriptions.length} total subscription${subscriptions.length === 1 ? "" : "s"}`;
 
@@ -630,7 +654,8 @@ function renderSubscriptions(rows) {
   emptyState.hidden = true;
 
   rows.forEach((row) => {
-    const tr = document.createElement("tr");
+    try {
+      const tr = document.createElement("tr");
     tr.className = "subscription-row";
 
     const nameTd = document.createElement("td");
@@ -657,13 +682,13 @@ function renderSubscriptions(rows) {
     tr.appendChild(startDateTd);
 
     const endDateTd = document.createElement("td");
-    const endDate = getEndDateValue(row);
+    const endDate = safeGetEndDateValue(row);
     endDateTd.textContent = formatDate(endDate) || "No end date";
     tr.appendChild(endDateTd);
 
     const statusTd = document.createElement("td");
     const statusPill = document.createElement("span");
-    const statusValue = calculateSubscriptionStatus(row);
+    const statusValue = safeCalculateSubscriptionStatus(row);
     statusPill.className = `status-pill status-${statusValue.replace(/\s+/g, "-")}`;
     statusPill.textContent = toStatusLabel(statusValue);
     statusTd.appendChild(statusPill);
@@ -714,12 +739,15 @@ function renderSubscriptions(rows) {
     actionsTd.appendChild(actions);
     tr.appendChild(actionsTd);
 
-    subscriptionsBody.appendChild(tr);
+      subscriptionsBody.appendChild(tr);
+    } catch (rowError) {
+      console.error("renderSubscriptions row error", { rowId: row?.id, rowError, row });
+    }
   });
 }
 
 function updateDashboardMetrics() {
-  const activeCount = subscriptions.filter((row) => calculateSubscriptionStatus(row) === "active").length;
+  const activeCount = subscriptions.filter((row) => safeCalculateSubscriptionStatus(row) === "active").length;
   metricTotalSubscriptions.textContent = String(subscriptions.length);
   metricActiveSubscriptions.textContent = String(activeCount);
   metricUserRole.textContent = currentUserRole || "signed out";
@@ -749,7 +777,7 @@ function renderRenewalsPanel() {
     item.className = "renewal-item";
     item.innerHTML = `<p><strong>${formatSubscriptionName(row)}</strong> • ${row.plan || "No plan"}</p><p>${formatDate(
       endDate
-    )} • ${toStatusLabel(calculateSubscriptionStatus(row))}</p>`;
+    )} • ${toStatusLabel(safeCalculateSubscriptionStatus(row))}</p>`;
     renewalsList.appendChild(item);
   });
 }
@@ -952,6 +980,7 @@ async function loadRenewals() {
 
   if (error) {
     if (isMissingTableError(error.message) || isMissingColumnError(error.message)) {
+      console.warn("loadRenewals fallback: renewal table/columns unavailable", error.message);
       renewalsBySubscription = new Map();
       return;
     }
@@ -970,6 +999,7 @@ async function loadSubscriptions() {
 
   setBusyState(true);
   setSubscriptionStatus("Loading subscriptions...");
+  console.debug("loadSubscriptions start");
 
   const queryResult = await supabase
     .from("subscriptions")
@@ -996,7 +1026,8 @@ async function loadSubscriptions() {
     return;
   }
 
-  subscriptions = data || [];
+  console.debug("loadSubscriptions query result", { rows: data?.length || 0 });
+  subscriptions = (data || []).filter((row) => !!row && typeof row === "object");
   try {
     await loadRenewals();
   } catch (renewalsError) {
@@ -1011,6 +1042,35 @@ async function loadSubscriptions() {
   if (!subscriptionStatus.textContent || !subscriptionStatus.textContent.includes("unavailable")) {
     setSubscriptionStatus("Subscriptions loaded.");
   }
+}
+
+function extractMissingColumnName(errorMessage = "") {
+  const match = errorMessage.match(/column\s+"?([a-zA-Z0-9_]+)"?\s+of relation/i);
+  return match?.[1] || null;
+}
+
+async function insertSubscriptionWithFallback(payload) {
+  let workingPayload = { ...payload };
+  let attempts = 0;
+
+  while (attempts < 8) {
+    attempts += 1;
+    console.debug("createSubscription insert attempt", { attempts, payload: workingPayload });
+    const { error } = await supabase.from("subscriptions").insert(workingPayload);
+    if (!error) {
+      return null;
+    }
+
+    const missingColumn = extractMissingColumnName(error.message || "");
+    if (!missingColumn || !(missingColumn in workingPayload)) {
+      return error;
+    }
+
+    console.warn("createSubscription dropping missing column", { missingColumn });
+    delete workingPayload[missingColumn];
+  }
+
+  return new Error("Unable to save subscription: schema mismatch fallback exhausted.");
 }
 
 function openAddForm() {
@@ -1384,6 +1444,7 @@ async function saveSubscription(event) {
 
   try {
     payload = getFormPayload();
+    console.debug("createSubscription payload", payload);
   } catch (error) {
     formError.textContent = error.message;
     return;
@@ -1428,12 +1489,26 @@ async function saveSubscription(event) {
       created_by: data.user.id,
     };
 
-    let { error } = await supabase.from("subscriptions").insert(insertPayload);
+    let error = await insertSubscriptionWithFallback(insertPayload);
 
     if (error && error.message?.toLowerCase().includes("column")) {
-      const { serial_number, customer_company_name, contact_name, contact_email, contact_phone, equipment_name, subscription_metadata, start_date, ...legacyInsertPayload } =
-        insertPayload;
+      const {
+        serial_number,
+        customer_company_name,
+        contact_name,
+        contact_email,
+        contact_phone,
+        equipment_name,
+        subscription_metadata,
+        start_date,
+        created_by,
+        end_date,
+        renewal_outcome,
+        ...legacyInsertPayload
+      } = insertPayload;
       legacyInsertPayload.renewal_date = start_date;
+      legacyInsertPayload.status = calculateSubscriptionStatus(legacyInsertPayload);
+      console.debug("createSubscription legacy payload", legacyInsertPayload);
       ({ error } = await supabase.from("subscriptions").insert(legacyInsertPayload));
     }
 
