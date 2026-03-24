@@ -152,6 +152,7 @@
                 <select id="sort-control" aria-label="Sort subscriptions">
                   <option value="start-date-asc">Start date (earliest)</option>
                   <option value="start-date-desc">Start date (latest)</option>
+                  <option value="status-asc">Status (A-Z)</option>
                   <option value="name-asc">Subscription name (A-Z)</option>
                 </select>
               </label>
@@ -168,6 +169,7 @@
                     <th>Owner</th>
                     <th>Billing frequency</th>
                     <th>Start date</th>
+                    <th>End date</th>
                     <th>Status</th>
                     <th>Actions</th>
                   </tr>
@@ -189,8 +191,8 @@
             data-view="renewals"
             aria-labelledby="renewals-heading"
           >
-            <h2 id="renewals-heading">Start dates</h2>
-            <p class="helper-text">Subscription start dates from your tracked subscriptions.</p>
+            <h2 id="renewals-heading">End date pipeline</h2>
+            <p class="helper-text">Upcoming expiries based on subscription end dates.</p>
             <div id="renewals-list" class="renewals-list"></div>
           </section>
 
@@ -329,13 +331,28 @@
           </label>
 
           <label>
-            Status
-            <select id="form-status" name="status">
-              <option value="active">active</option>
-              <option value="cancelled">cancelled</option>
-              <option value="expired">expired</option>
+            End date
+            <input id="end-date" name="end_date" type="date" />
+          </label>
+
+          <label>
+            Renewal outcome
+            <select id="renewal-outcome" name="renewal_outcome">
+              <option value="pending">pending</option>
+              <option value="renewed">renewed</option>
+              <option value="churned">churned</option>
+              <option value="migrated">migrated</option>
             </select>
           </label>
+
+          <label>
+            Calculated status
+            <input id="form-calculated-status" name="calculated_status" readonly aria-readonly="true" />
+          </label>
+          <p class="helper-text">
+            Status is calculated from End date windows (Active → Quote → Invoice → Final Warning). Migrated overrides
+            timing, and expired subscriptions without renewal become Churned.
+          </p>
 
           <label>
             Notes
