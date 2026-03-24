@@ -328,16 +328,6 @@
           </label>
 
           <label>
-            Renewal outcome
-            <select id="renewal-outcome" name="renewal_outcome">
-              <option value="pending">pending</option>
-              <option value="renewed">renewed</option>
-              <option value="churned">churned</option>
-              <option value="migrated">migrated</option>
-            </select>
-          </label>
-
-          <label>
             Calculated status
             <input id="form-calculated-status" name="calculated_status" readonly aria-readonly="true" />
           </label>
@@ -359,6 +349,89 @@
           <button id="cancel-subscription-btn" type="button" class="secondary">Cancel</button>
         </div>
       </form>
+    </dialog>
+
+    <dialog id="renewal-dialog">
+      <form id="renewal-form" method="dialog" novalidate>
+        <h3>Renew subscription</h3>
+        <p class="helper-text">
+          Create the next term for <strong id="renewal-target-name">—</strong>.
+        </p>
+
+        <fieldset class="form-group">
+          <legend>Renewal term</legend>
+
+          <label>
+            Renewal start date
+            <input id="renewal-start-date" name="renewal_start_date" type="date" required />
+          </label>
+
+          <label>
+            Billing frequency
+            <select id="renewal-billing-cycle" name="billing_cycle">
+              <option value="1 year">1 year</option>
+              <option value="2 years">2 years</option>
+              <option value="5 years">5 years</option>
+            </select>
+          </label>
+
+          <label>
+            Renewal end date (calculated)
+            <input id="renewal-end-date" name="renewal_end_date" type="date" readonly aria-readonly="true" />
+          </label>
+
+          <label>
+            Renewal outcome
+            <select id="renewal-outcome" name="renewal_outcome">
+              <option value="pending">pending</option>
+              <option value="renewed">renewed</option>
+              <option value="churned">churned</option>
+              <option value="migrated">migrated</option>
+            </select>
+          </label>
+
+          <label>
+            Calculated status
+            <input id="renewal-calculated-status" name="renewal_calculated_status" readonly aria-readonly="true" />
+          </label>
+
+          <label>
+            Renewal notes
+            <textarea id="renewal-notes" name="notes" rows="3"></textarea>
+          </label>
+        </fieldset>
+
+        <p id="renewal-form-error" class="error-text" role="alert"></p>
+
+        <div class="dialog-actions">
+          <button id="save-renewal-btn" type="submit">Save renewal</button>
+          <button id="cancel-renewal-btn" type="button" class="secondary">Cancel</button>
+        </div>
+      </form>
+    </dialog>
+
+    <dialog id="subscription-detail-dialog">
+      <article class="detail-layout">
+        <header class="detail-header">
+          <h3 id="detail-title">Subscription details</h3>
+          <button id="close-detail-btn" type="button" class="secondary">Close</button>
+        </header>
+
+        <section>
+          <h4>Subscription information</h4>
+          <dl id="detail-metadata-list" class="detail-grid"></dl>
+        </section>
+
+        <section>
+          <h4>Current term</h4>
+          <dl id="detail-current-term-list" class="detail-grid"></dl>
+        </section>
+
+        <section>
+          <h4>Renewal history</h4>
+          <div id="detail-renewal-history" class="renewals-list"></div>
+        </section>
+      </article>
     </dialog>
 
     <script type="module" src="./app.js"></script>
