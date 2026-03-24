@@ -121,7 +121,7 @@
                 <input
                   id="search-input"
                   type="search"
-                  placeholder="Search subscription, vendor, or plan"
+                  placeholder="Search subscription, customer, equipment, serial, or plan"
                   aria-label="Search subscriptions"
                 />
               </label>
@@ -166,7 +166,7 @@
                 <thead>
                   <tr>
                     <th>Subscription name</th>
-                    <th>Vendor</th>
+                    <th>Customer</th>
                     <th>Owner</th>
                     <th>Cost</th>
                     <th>Billing frequency</th>
@@ -267,58 +267,94 @@
         <h3 id="form-title">Add subscription</h3>
 
         <label>
-          Vendor name *
-          <input id="vendor-name" name="vendor_name" required />
+          Subscription display name (auto-generated)
+          <input id="generated-display-name" name="generated_display_name" readonly aria-readonly="true" />
         </label>
 
-        <label>
-          Product name
-          <input id="product-name" name="product_name" />
-        </label>
+        <fieldset class="form-group">
+          <legend>Customer</legend>
 
-        <label>
-          Plan
-          <input id="plan" name="plan" />
-        </label>
+          <label>
+            Customer company name
+            <input id="customer-company-name" name="customer_company_name" />
+          </label>
 
-        <label>
-          Cost amount
-          <input id="cost-amount" name="cost_amount" type="number" step="0.01" min="0" />
-        </label>
+          <label>
+            Contact name
+            <input id="contact-name" name="contact_name" />
+          </label>
 
-        <label>
-          Cost currency
-          <input id="cost-currency" name="cost_currency" value="AUD" />
-        </label>
+          <label>
+            Contact email
+            <input id="contact-email" name="contact_email" type="email" />
+          </label>
 
-        <label>
-          Billing cycle
-          <input id="billing-cycle" name="billing_cycle" value="monthly" list="billing-cycle-options" />
-          <datalist id="billing-cycle-options">
-            <option value="monthly"></option>
-            <option value="annual"></option>
-            <option value="quarterly"></option>
-          </datalist>
-        </label>
+          <label>
+            Contact phone
+            <input id="contact-phone" name="contact_phone" />
+          </label>
+        </fieldset>
 
-        <label>
-          Renewal date
-          <input id="renewal-date" name="renewal_date" type="date" />
-        </label>
+        <fieldset class="form-group">
+          <legend>Equipment</legend>
 
-        <label>
-          Status
-          <select id="form-status" name="status">
-            <option value="active">active</option>
-            <option value="cancelled">cancelled</option>
-            <option value="expired">expired</option>
-          </select>
-        </label>
+          <label>
+            Device / equipment name
+            <input id="equipment-name" name="equipment_name" />
+          </label>
 
-        <label>
-          Notes
-          <textarea id="notes" name="notes" rows="3"></textarea>
-        </label>
+          <label>
+            Serial number
+            <input id="serial-number" name="serial_number" />
+          </label>
+        </fieldset>
+
+        <fieldset class="form-group">
+          <legend>Subscription details</legend>
+
+          <label>
+            Plan
+            <input id="plan" name="plan" />
+          </label>
+
+          <label>
+            Cost amount
+            <input id="cost-amount" name="cost_amount" type="number" step="0.01" min="0" />
+          </label>
+
+          <label>
+            Cost currency
+            <input id="cost-currency" name="cost_currency" value="AUD" />
+          </label>
+
+          <label>
+            Billing frequency
+            <select id="billing-cycle" name="billing_cycle">
+              <option value="1 year">1 year</option>
+              <option value="2 years">2 years</option>
+              <option value="5 years">5 years</option>
+            </select>
+          </label>
+
+          <label>
+            Renewal date
+            <input id="renewal-date" name="renewal_date" type="date" />
+          </label>
+
+          <label>
+            Status
+            <select id="form-status" name="status">
+              <option value="active">active</option>
+              <option value="cancelled">cancelled</option>
+              <option value="expired">expired</option>
+            </select>
+          </label>
+
+          <label>
+            Notes
+            <textarea id="notes" name="notes" rows="3"></textarea>
+          </label>
+        </fieldset>
 
         <p id="form-error" class="error-text" role="alert"></p>
 
