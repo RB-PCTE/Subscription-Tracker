@@ -907,6 +907,7 @@ function buildRenewalsMap(rows = []) {
       ...row,
       renewal_start_date: row.renewal_start_date || row.start_date || null,
       renewal_end_date: row.renewal_end_date || row.end_date || null,
+      billing_cycle: row.billing_cycle || row.billing_frequency || null,
       renewal_outcome: normalizeRenewalOutcome(row.renewal_outcome || row.outcome),
     };
 
@@ -925,17 +926,32 @@ function buildRenewalsMap(rows = []) {
 }
 
 async function loadRenewals() {
-  const { data, error } = await supabase
+  const normalizedErrorMessage = (message = "") => message.toLowerCase();
+  const isMissingTableError = (message = "") => {
+    const normalizedMessage = normalizedErrorMessage(message);
+    return normalizedMessage.includes("does not exist") || normalizedMessage.includes("relation");
+  };
+  const isMissingColumnError = (message = "") => normalizedErrorMessage(message).includes("column");
+
+  const currentSchemaResult = await supabase
     .from("subscription_renewals")
     .select("*")
-    .order("renewal_start_date", { ascending: true, nullsFirst: false });
+    .order("start_date", { ascending: true, nullsFirst: false });
+
+  let data = currentSchemaResult.data;
+  let error = currentSchemaResult.error;
+
+  if (error && isMissingColumnError(error.message)) {
+    const legacySchemaResult = await supabase
+      .from("subscription_renewals")
+      .select("*")
+      .order("renewal_start_date", { ascending: true, nullsFirst: false });
+    data = legacySchemaResult.data;
+    error = legacySchemaResult.error;
+  }
 
   if (error) {
-    const normalizedMessage = (error.message || "").toLowerCase();
-    const isMissingTable = normalizedMessage.includes("does not exist") || normalizedMessage.includes("relation");
-    const isMissingColumn = normalizedMessage.includes("column");
-
-    if (isMissingTable || isMissingColumn) {
+    if (isMissingTableError(error.message) || isMissingColumnError(error.message)) {
       renewalsBySubscription = new Map();
       return;
     }
@@ -1307,15 +1323,28 @@ async function saveRenewal(event) {
 
   const renewalPayload = {
     subscription_id: renewingSubscriptionId,
-    renewal_start_date: startDate,
-    renewal_end_date: endDate,
-    billing_cycle: billingCycle,
+    start_date: startDate,
+    end_date: endDate,
+    billing_frequency: billingCycle,
     renewal_outcome: outcome,
     status: calculateSubscriptionStatus({ end_date: endDate, renewal_outcome: outcome }),
     notes,
   };
 
-  const { error } = await supabase.from("subscription_renewals").insert(renewalPayload);
+  let { error } = await supabase.from("subscription_renewals").insert(renewalPayload);
+
+  if (error && (error.message || "").toLowerCase().includes("column")) {
+    const legacyRenewalPayload = {
+      subscription_id: renewingSubscriptionId,
+      renewal_start_date: startDate,
+      renewal_end_date: endDate,
+      billing_cycle: billingCycle,
+      renewal_outcome: outcome,
+      status: renewalPayload.status,
+      notes,
+    };
+    ({ error } = await supabase.from("subscription_renewals").insert(legacyRenewalPayload));
+  }
 
   isSubmittingRenewalForm = false;
   saveRenewalButton.disabled = false;
