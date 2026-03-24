@@ -17,7 +17,7 @@
         <nav class="sidebar-nav">
           <button type="button" class="nav-item is-active" data-nav-target="dashboard" id="nav-dashboard">Dashboard</button>
           <button type="button" class="nav-item" data-nav-target="subscriptions" id="nav-subscriptions">Subscriptions</button>
-          <button type="button" class="nav-item" data-nav-target="renewals" id="nav-renewals">Renewals</button>
+          <button type="button" class="nav-item" data-nav-target="renewals" id="nav-renewals">Start Dates</button>
 
           <div id="admin-nav-group" hidden>
             <p class="nav-group-label">Admin</p>
@@ -38,7 +38,7 @@
         <header class="top-header">
           <div class="top-header-title">
             <p class="brand-kicker">SaaS Console</p>
-            <p>Manage billing access and renewals</p>
+            <p>Manage subscription access and start dates</p>
           </div>
 
           <div class="header-actions">
@@ -58,7 +58,7 @@
                 <p id="metric-total-subscriptions">0</p>
               </article>
               <article class="metric-card">
-                <h3>Active renewals tracked</h3>
+                <h3>Active subscriptions tracked</h3>
                 <p id="metric-active-subscriptions">0</p>
               </article>
               <article class="metric-card">
@@ -150,10 +150,8 @@
               <label class="toolbar-field" for="sort-control">
                 <span>Sort</span>
                 <select id="sort-control" aria-label="Sort subscriptions">
-                  <option value="renewal-asc">Renewal date (soonest)</option>
-                  <option value="renewal-desc">Renewal date (latest)</option>
-                  <option value="cost-desc">Cost (high to low)</option>
-                  <option value="cost-asc">Cost (low to high)</option>
+                  <option value="start-date-asc">Start date (earliest)</option>
+                  <option value="start-date-desc">Start date (latest)</option>
                   <option value="name-asc">Subscription name (A-Z)</option>
                 </select>
               </label>
@@ -168,9 +166,8 @@
                     <th>Subscription name</th>
                     <th>Customer</th>
                     <th>Owner</th>
-                    <th>Cost</th>
                     <th>Billing frequency</th>
-                    <th>Renewal date</th>
+                    <th>Start date</th>
                     <th>Status</th>
                     <th>Actions</th>
                   </tr>
@@ -192,8 +189,8 @@
             data-view="renewals"
             aria-labelledby="renewals-heading"
           >
-            <h2 id="renewals-heading">Renewals</h2>
-            <p class="helper-text">Upcoming renewal dates from your tracked subscriptions.</p>
+            <h2 id="renewals-heading">Start dates</h2>
+            <p class="helper-text">Subscription start dates from your tracked subscriptions.</p>
             <div id="renewals-list" class="renewals-list"></div>
           </section>
 
@@ -318,16 +315,6 @@
           </label>
 
           <label>
-            Cost amount
-            <input id="cost-amount" name="cost_amount" type="number" step="0.01" min="0" />
-          </label>
-
-          <label>
-            Cost currency
-            <input id="cost-currency" name="cost_currency" value="AUD" />
-          </label>
-
-          <label>
             Billing frequency
             <select id="billing-cycle" name="billing_cycle">
               <option value="1 year">1 year</option>
@@ -337,8 +324,8 @@
           </label>
 
           <label>
-            Renewal date
-            <input id="renewal-date" name="renewal_date" type="date" />
+            Start date
+            <input id="start-date" name="start_date" type="date" />
           </label>
 
           <label>

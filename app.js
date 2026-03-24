@@ -131,15 +131,6 @@ function setUserManagementStatus(message, isError = false) {
   userManagementStatus.style.color = isError ? "#b91c1c" : "#0f172a";
 }
 
-function formatAmount(row) {
-  if (row.cost_amount === null || row.cost_amount === undefined || row.cost_amount === "") {
-    return "";
-  }
-
-  const currency = row.cost_currency || "AUD";
-  return `${currency} ${Number(row.cost_amount).toFixed(2)}`;
-}
-
 function formatDate(dateString) {
   if (!dateString) {
     return "";
@@ -151,6 +142,10 @@ function formatDate(dateString) {
   }
 
   return parsed.toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" });
+}
+
+function getStartDateValue(row = {}) {
+  return row.start_date || row.renewal_date || null;
 }
 
 function formatSubscriptionName(row) {
@@ -193,7 +188,6 @@ function getSubscriptionMetadata(row = {}) {
       row.customer_company ||
       structured?.customerCompanyName ||
       embedded.metadata?.customerCompanyName ||
-      row.vendor_name ||
       "",
     contactName: row.contact_name || structured?.contactName || embedded.metadata?.contactName || "",
     contactEmail: row.contact_email || structured?.contactEmail || embedded.metadata?.contactEmail || "",
@@ -226,7 +220,6 @@ function generateSubscriptionDisplayName(metadata = {}, row = {}) {
     return (
       parts[0] ||
       row.product_name ||
-      row.vendor_name ||
       row.plan ||
       row.name ||
       row.subscription_name ||
@@ -234,7 +227,7 @@ function generateSubscriptionDisplayName(metadata = {}, row = {}) {
     );
   }
 
-  return row.product_name || row.vendor_name || row.plan || row.name || row.subscription_name || "Untitled subscription";
+  return row.product_name || row.plan || row.name || row.subscription_name || "Untitled subscription";
 }
 
 function getDisplayNotes(row) {
@@ -270,21 +263,21 @@ function toStatusLabel(value) {
   return normalized.charAt(0).toUpperCase() + normalized.slice(1);
 }
 
-function getRenewalUrgency(renewalDate) {
-  if (!renewalDate) {
+function getStartDateUrgency(startDate) {
+  if (!startDate) {
     return "renewal-none";
   }
 
-  const dateValue = new Date(renewalDate);
+  const dateValue = new Date(startDate);
   if (Number.isNaN(dateValue.getTime())) {
     return "renewal-none";
   }
 
   const now = new Date();
   now.setHours(0, 0, 0, 0);
-  const renewal = new Date(dateValue);
-  renewal.setHours(0, 0, 0, 0);
-  const daysUntil = Math.floor((renewal.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
+  const start = new Date(dateValue);
+  start.setHours(0, 0, 0, 0);
+  const daysUntil = Math.floor((start.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
 
   if (daysUntil < 0) {
     return "renewal-urgent";
@@ -354,20 +347,14 @@ function getFilteredSubscriptions() {
 
   const sorted = [...filtered];
   switch (sortControl.value) {
-    case "renewal-desc":
-      sorted.sort((a, b) => new Date(b.renewal_date || 0).getTime() - new Date(a.renewal_date || 0).getTime());
-      break;
-    case "cost-desc":
-      sorted.sort((a, b) => (Number(b.cost_amount) || 0) - (Number(a.cost_amount) || 0));
-      break;
-    case "cost-asc":
-      sorted.sort((a, b) => (Number(a.cost_amount) || 0) - (Number(b.cost_amount) || 0));
+    case "start-date-desc":
+      sorted.sort((a, b) => new Date(getStartDateValue(b) || 0).getTime() - new Date(getStartDateValue(a) || 0).getTime());
       break;
     case "name-asc":
       sorted.sort((a, b) => formatSubscriptionName(a).localeCompare(formatSubscriptionName(b)));
       break;
     default:
-      sorted.sort((a, b) => new Date(a.renewal_date || 0).getTime() - new Date(b.renewal_date || 0).getTime());
+      sorted.sort((a, b) => new Date(getStartDateValue(a) || 0).getTime() - new Date(getStartDateValue(b) || 0).getTime());
       break;
   }
 
@@ -409,27 +396,23 @@ function renderSubscriptions(rows) {
     )}</strong><span>${secondaryParts.join(" • ")}</span>`;
     tr.appendChild(nameTd);
 
-    const vendorTd = document.createElement("td");
-    vendorTd.textContent = metadata.customerCompanyName || row.vendor_name || "—";
-    tr.appendChild(vendorTd);
+    const customerTd = document.createElement("td");
+    customerTd.textContent = metadata.customerCompanyName || "—";
+    tr.appendChild(customerTd);
 
     const ownerTd = document.createElement("td");
     ownerTd.textContent = formatOwner(row);
     tr.appendChild(ownerTd);
 
-    const amountTd = document.createElement("td");
-    amountTd.textContent = formatAmount(row) || "—";
-    amountTd.className = "amount-cell";
-    tr.appendChild(amountTd);
-
     const cycleTd = document.createElement("td");
     cycleTd.textContent = row.billing_cycle || "—";
     tr.appendChild(cycleTd);
 
-    const renewalTd = document.createElement("td");
-    renewalTd.textContent = formatDate(row.renewal_date) || "No renewal date";
-    renewalTd.className = `renewal-cell ${getRenewalUrgency(row.renewal_date)}`;
-    tr.appendChild(renewalTd);
+    const startDateTd = document.createElement("td");
+    const startDate = getStartDateValue(row);
+    startDateTd.textContent = formatDate(startDate) || "No start date";
+    startDateTd.className = `renewal-cell ${getStartDateUrgency(startDate)}`;
+    tr.appendChild(startDateTd);
 
     const statusTd = document.createElement("td");
     const statusPill = document.createElement("span");
@@ -491,28 +474,29 @@ function updateDashboardMetrics() {
 
 function renderRenewalsPanel() {
   if (!subscriptions.length) {
-    renewalsList.innerHTML = '<div class="renewal-item"><p>No renewal data yet. Add subscriptions to populate this view.</p></div>';
+    renewalsList.innerHTML = '<div class="renewal-item"><p>No start date data yet. Add subscriptions to populate this view.</p></div>';
     return;
   }
 
   const upcomingRows = subscriptions
-    .filter((row) => row.renewal_date)
-    .sort((a, b) => new Date(a.renewal_date).getTime() - new Date(b.renewal_date).getTime())
+    .filter((row) => getStartDateValue(row))
+    .sort((a, b) => new Date(getStartDateValue(a)).getTime() - new Date(getStartDateValue(b)).getTime())
     .slice(0, 6);
 
   if (!upcomingRows.length) {
-    renewalsList.innerHTML = '<div class="renewal-item"><p>No upcoming renewal dates found.</p></div>';
+    renewalsList.innerHTML = '<div class="renewal-item"><p>No start dates found.</p></div>';
     return;
   }
 
   renewalsList.innerHTML = "";
 
   upcomingRows.forEach((row) => {
+    const startDate = getStartDateValue(row);
     const item = document.createElement("article");
     item.className = "renewal-item";
     item.innerHTML = `<p><strong>${formatSubscriptionName(row)}</strong> • ${row.plan || "No plan"}</p><p>${formatDate(
-      row.renewal_date
-    )} • ${formatAmount(row) || "Amount not set"}</p>`;
+      startDate
+    )}</p>`;
     renewalsList.appendChild(item);
   });
 }
@@ -667,10 +651,22 @@ async function loadSubscriptions() {
   setBusyState(true);
   setSubscriptionStatus("Loading subscriptions...");
 
-  const { data, error } = await supabase
+  const queryResult = await supabase
     .from("subscriptions")
     .select("*")
-    .order("renewal_date", { ascending: true, nullsFirst: false });
+    .order("start_date", { ascending: true, nullsFirst: false });
+
+  let data = null;
+  let error = null;
+
+  if (queryResult.error && queryResult.error.message?.toLowerCase().includes("column")) {
+    const legacyResult = await supabase.from("subscriptions").select("*").order("renewal_date", { ascending: true, nullsFirst: false });
+    data = legacyResult.data;
+    error = legacyResult.error;
+  } else {
+    data = queryResult.data;
+    error = queryResult.error;
+  }
 
   setBusyState(false);
 
@@ -700,7 +696,6 @@ function openAddForm() {
   formTitle.textContent = "Add subscription";
   formError.textContent = "";
   subscriptionForm.reset();
-  subscriptionForm.elements.cost_currency.value = "AUD";
   subscriptionForm.elements.billing_cycle.value = "1 year";
   subscriptionForm.elements.status.value = "active";
   updateGeneratedNamePreview();
@@ -729,11 +724,9 @@ function openEditForm(row) {
   subscriptionForm.elements.equipment_name.value = metadata.equipmentName || "";
   subscriptionForm.elements.serial_number.value = metadata.serialNumber || "";
   subscriptionForm.elements.plan.value = row.plan || "";
-  subscriptionForm.elements.cost_amount.value = row.cost_amount ?? "";
-  subscriptionForm.elements.cost_currency.value = row.cost_currency || "AUD";
   ensureSelectHasOption(subscriptionForm.elements.billing_cycle, row.billing_cycle || "1 year");
   subscriptionForm.elements.billing_cycle.value = row.billing_cycle || "1 year";
-  subscriptionForm.elements.renewal_date.value = row.renewal_date || "";
+  subscriptionForm.elements.start_date.value = getStartDateValue(row) || "";
   subscriptionForm.elements.status.value = row.status || "active";
   subscriptionForm.elements.notes.value = userNotes || "";
   updateGeneratedNamePreview();
@@ -751,7 +744,6 @@ function getFormPayload() {
     throw new Error("Enter at least a customer company, equipment/device, or serial number.");
   }
 
-  const costAmountRaw = (formData.get("cost_amount") || "").toString().trim();
   const metadata = {
     customerCompanyName,
     contactName: (formData.get("contact_name") || "").toString().trim(),
@@ -763,7 +755,6 @@ function getFormPayload() {
   const notes = (formData.get("notes") || "").toString();
 
   return {
-    vendor_name: customerCompanyName || null,
     product_name: equipmentName || null,
     serial_number: serialNumber || null,
     customer_company_name: customerCompanyName || null,
@@ -773,10 +764,8 @@ function getFormPayload() {
     equipment_name: equipmentName || null,
     subscription_metadata: metadata,
     plan: (formData.get("plan") || "").toString().trim() || null,
-    cost_amount: costAmountRaw ? Number(costAmountRaw) : null,
-    cost_currency: (formData.get("cost_currency") || "AUD").toString().trim() || "AUD",
     billing_cycle: (formData.get("billing_cycle") || "1 year").toString().trim() || "1 year",
-    renewal_date: (formData.get("renewal_date") || "").toString() || null,
+    start_date: (formData.get("start_date") || "").toString() || null,
     status: (formData.get("status") || "active").toString(),
     notes: buildNotesWithMetadata(notes, metadata),
   };
@@ -784,13 +773,10 @@ function getFormPayload() {
 
 function toLegacyPayload(payload) {
   return {
-    vendor_name: payload.vendor_name,
     product_name: payload.product_name,
     plan: payload.plan,
-    cost_amount: payload.cost_amount,
-    cost_currency: payload.cost_currency,
     billing_cycle: payload.billing_cycle,
-    renewal_date: payload.renewal_date,
+    renewal_date: payload.start_date,
     status: payload.status,
     notes: payload.notes,
   };
@@ -886,8 +872,9 @@ async function saveSubscription(event) {
     let { error } = await supabase.from("subscriptions").insert(insertPayload);
 
     if (error && error.message?.toLowerCase().includes("column")) {
-      const { serial_number, customer_company_name, contact_name, contact_email, contact_phone, equipment_name, subscription_metadata, ...legacyInsertPayload } =
+      const { serial_number, customer_company_name, contact_name, contact_email, contact_phone, equipment_name, subscription_metadata, start_date, ...legacyInsertPayload } =
         insertPayload;
+      legacyInsertPayload.renewal_date = start_date;
       ({ error } = await supabase.from("subscriptions").insert(legacyInsertPayload));
     }
 

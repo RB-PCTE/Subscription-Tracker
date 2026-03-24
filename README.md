@@ -23,18 +23,24 @@ A starter scaffold for building a customer subscription tracking app.
 Create a table named `public.subscriptions` with these columns:
 
 - `id` (uuid, primary key)
-- `vendor_name` (text, required)
 - `product_name` (text, optional)
+- `customer_company_name` (text, optional)
+- `contact_name` (text, optional)
+- `contact_email` (text, optional)
+- `contact_phone` (text, optional)
+- `equipment_name` (text, optional)
+- `serial_number` (text, optional)
+- `subscription_metadata` (jsonb, optional)
 - `plan` (text, optional)
-- `cost_amount` (numeric, optional)
-- `cost_currency` (text, default `AUD`)
 - `billing_cycle` (text, default `monthly`)
-- `renewal_date` (date, optional)
+- `start_date` (date, optional)
 - `status` (text, default `active`)
 - `notes` (text, optional)
 - `created_by` (uuid, optional)
 - `created_at` (timestamptz)
 - `updated_at` (timestamptz)
+
+Legacy columns such as `vendor_name`, `cost_amount`, `cost_currency`, or `renewal_date` can remain in older databases for backwards compatibility, but the current UI no longer writes or displays vendor/cost and uses **start date** wording.
 
 Enable RLS and add policies so authenticated users can read and write rows needed by this app (select, insert, update, delete).
 
