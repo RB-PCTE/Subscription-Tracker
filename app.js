@@ -561,28 +561,39 @@ function getStatusTermForSubscription(subscription = {}, latestRenewal = null) {
 }
 
 function calculateSubscriptionStatus(subscription = {}, latestRenewal = null, today = new Date()) {
-  console.debug("calculateSubscriptionStatus", { id: subscription?.id, today: toIsoDateString(today) });
   const resolvedLatestRenewal = resolveLatestTermForStatus(subscription, latestRenewal);
   const statusTerm = getStatusTermForSubscription(subscription, latestRenewal);
   const legacyStatus = (subscription.status || "unknown").toString().trim().toLowerCase() || "unknown";
   const outcome = normalizeRenewalOutcome(resolvedLatestRenewal?.renewal_outcome || subscription.renewal_outcome || "renewed");
-  const effectiveDate = parseDateStartOfDay(
-    resolvedLatestRenewal?.renewal_start_date || subscription.start_date || subscription.renewal_date,
-  );
   const endDate = parseDateStartOfDay(statusTerm?.renewal_end_date || statusTerm?.end_date || null);
   const normalizedToday = parseDateStartOfDay(today) || new Date();
   normalizedToday.setHours(0, 0, 0, 0);
+  const logStatusDecision = (matchedBranch, statusValue) => {
+    console.debug("calculateSubscriptionStatus decision", {
+      subscriptionId: subscription?.id || null,
+      relevantEndDate: toIsoDateString(endDate),
+      today: toIsoDateString(normalizedToday),
+      matchedBranch,
+      status: statusValue,
+    });
 
-  if (outcome === "migrated" || outcome === "churned") {
-    if (effectiveDate && normalizedToday < effectiveDate) {
-      return "active";
-    }
+    return statusValue;
+  };
 
-    return outcome;
+  if (outcome === "migrated") {
+    return logStatusDecision("latest-renewal-outcome-migrated", "migrated");
+  }
+
+  if (outcome === "churned") {
+    return logStatusDecision("latest-renewal-outcome-churned", "churned");
   }
 
   if (!endDate) {
-    return legacyStatus;
+    return logStatusDecision("missing-relevant-end-date-fallback", legacyStatus);
+  }
+
+  if (normalizedToday > endDate) {
+    return logStatusDecision("post-expiry-attn-required", "attn required");
   }
 
   const quoteBoundary = subtractMonthsClamped(endDate, 3);
@@ -590,30 +601,26 @@ function calculateSubscriptionStatus(subscription = {}, latestRenewal = null, to
   const finalWarningBoundary = subtractMonthsClamped(endDate, 1);
 
   if (!quoteBoundary || !invoiceBoundary || !finalWarningBoundary) {
-    return legacyStatus;
+    return logStatusDecision("invalid-pre-expiry-boundaries-fallback", legacyStatus);
   }
 
   if (normalizedToday < quoteBoundary) {
-    return "active";
+    return logStatusDecision("pre-quote-active", "active");
   }
 
   if (normalizedToday >= quoteBoundary && normalizedToday < invoiceBoundary) {
-    return "quote";
+    return logStatusDecision("quote-window", "quote");
   }
 
   if (normalizedToday >= invoiceBoundary && normalizedToday < finalWarningBoundary) {
-    return "invoice";
+    return logStatusDecision("invoice-window", "invoice");
   }
 
-  if (normalizedToday >= finalWarningBoundary && normalizedToday < endDate) {
-    return "final warning";
+  if (normalizedToday >= finalWarningBoundary && normalizedToday <= endDate) {
+    return logStatusDecision("final-warning-window", "final warning");
   }
 
-  if (normalizedToday >= endDate) {
-    return "attn required";
-  }
-
-  return legacyStatus;
+  return logStatusDecision("terminal-fallback", legacyStatus);
 }
 
 function getStartDateUrgency(row) {
