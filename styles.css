@@ -468,6 +468,12 @@ td {
   border-color: #fda4af;
 }
 
+.status-attn-required {
+  color: #ffffff;
+  background: #b91c1c;
+  border-color: #991b1b;
+}
+
 .status-churned {
   color: #7f1d1d;
   background: #fee2e2;

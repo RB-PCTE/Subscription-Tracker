@@ -251,9 +251,10 @@ function getCurrentTermEndDateValue(row = {}) {
 }
 
 function getTableRowDateRange(row = {}) {
+  const statusTerm = getStatusTermForSubscription(row);
   return {
-    startDate: getBaseStartDateValue(row),
-    endDate: getBaseEndDateValue(row),
+    startDate: statusTerm?.renewal_start_date || statusTerm?.start_date || getBaseStartDateValue(row),
+    endDate: statusTerm?.renewal_end_date || statusTerm?.end_date || getBaseEndDateValue(row),
   };
 }
 
@@ -518,19 +519,57 @@ function resolveLatestTermForStatus(subscription = {}, latestRenewal = null) {
   return getCurrentTerm(subscription);
 }
 
+function hasValidTermRange(term = {}) {
+  const startDate = parseDateStartOfDay(term?.renewal_start_date || term?.start_date || null);
+  const endDate = parseDateStartOfDay(term?.renewal_end_date || term?.end_date || null);
+  return Boolean(startDate && endDate && endDate >= startDate);
+}
+
+function getLatestRenewedTermForStatus(subscription = {}, latestRenewal = null) {
+  const timeline = getRenewalTimeline(subscription);
+  if (latestRenewal?.subscription_id === subscription?.id) {
+    timeline.push(latestRenewal);
+  }
+
+  const sorted = sortRenewalTerms(timeline);
+  for (let index = sorted.length - 1; index >= 0; index -= 1) {
+    const term = sorted[index];
+    if (!isRenewedOutcome(term?.renewal_outcome)) {
+      continue;
+    }
+
+    if (hasValidTermRange(term)) {
+      return term;
+    }
+  }
+
+  return null;
+}
+
+function getStatusTermForSubscription(subscription = {}, latestRenewal = null) {
+  const renewedTerm = getLatestRenewedTermForStatus(subscription, latestRenewal);
+  if (renewedTerm) {
+    return renewedTerm;
+  }
+
+  return {
+    renewal_start_date: getBaseStartDateValue(subscription),
+    renewal_end_date: getBaseEndDateValue(subscription),
+    billing_cycle: subscription.billing_cycle || null,
+    renewal_outcome: normalizeRenewalOutcome(subscription.renewal_outcome),
+  };
+}
+
 function calculateSubscriptionStatus(subscription = {}, latestRenewal = null, today = new Date()) {
   console.debug("calculateSubscriptionStatus", { id: subscription?.id, today: toIsoDateString(today) });
   const resolvedLatestRenewal = resolveLatestTermForStatus(subscription, latestRenewal);
+  const statusTerm = getStatusTermForSubscription(subscription, latestRenewal);
   const legacyStatus = (subscription.status || "unknown").toString().trim().toLowerCase() || "unknown";
-  const outcome = normalizeRenewalOutcome(resolvedLatestRenewal?.renewal_outcome || "renewed");
+  const outcome = normalizeRenewalOutcome(resolvedLatestRenewal?.renewal_outcome || subscription.renewal_outcome || "renewed");
   const effectiveDate = parseDateStartOfDay(
     resolvedLatestRenewal?.renewal_start_date || subscription.start_date || subscription.renewal_date,
   );
-  const endDate = parseDateStartOfDay(
-    resolvedLatestRenewal?.renewal_end_date ||
-      subscription.end_date ||
-      calculateSubscriptionEndDate(subscription),
-  );
+  const endDate = parseDateStartOfDay(statusTerm?.renewal_end_date || statusTerm?.end_date || null);
   const normalizedToday = parseDateStartOfDay(today) || new Date();
   normalizedToday.setHours(0, 0, 0, 0);
 
@@ -571,13 +610,7 @@ function calculateSubscriptionStatus(subscription = {}, latestRenewal = null, to
   }
 
   if (normalizedToday >= endDate) {
-    if (outcome === "renewed") {
-      return "active";
-    }
-
-    if (outcome === "churned" || outcome === "pending") {
-      return "churned";
-    }
+    return "attn required";
   }
 
   return legacyStatus;
@@ -1411,7 +1444,7 @@ function renderDetailList(container, rows) {
 
 function openSubscriptionDetail(row) {
   const metadata = getSubscriptionMetadata(row);
-  const currentTerm = getCurrentTerm(row);
+  const currentTerm = getStatusTermForSubscription(row);
   const history = getRenewalTimeline(row);
 
   detailTitle.textContent = formatSubscriptionName(row);
