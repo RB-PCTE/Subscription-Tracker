@@ -170,6 +170,28 @@ function getRenewalsForSubscription(subscriptionId) {
   return renewalsBySubscription.get(subscriptionId) || [];
 }
 
+function getTermStartDateValue(term = {}) {
+  return term?.start_date || term?.effective_date || term?.renewal_start_date || null;
+}
+
+function getTermEndDateValue(term = {}) {
+  return term?.end_date || term?.renewal_end_date || null;
+}
+
+function normalizeRenewalTerm(term = {}) {
+  if (!term || typeof term !== "object") {
+    return null;
+  }
+
+  return {
+    ...term,
+    renewal_start_date: getTermStartDateValue(term),
+    renewal_end_date: getTermEndDateValue(term),
+    billing_cycle: term?.billing_frequency || term?.billing_cycle || null,
+    renewal_outcome: normalizeRenewalOutcome(term?.renewal_outcome || term?.outcome),
+  };
+}
+
 function getLegacyTermFromSubscription(row = {}) {
   const startDate = row.start_date || row.renewal_date || null;
   if (!startDate) {
@@ -190,9 +212,13 @@ function getLegacyTermFromSubscription(row = {}) {
 }
 
 function sortRenewalTerms(terms = []) {
-  return [...terms].sort((a, b) => {
-    const aStart = new Date(a.renewal_start_date || 0).getTime();
-    const bStart = new Date(b.renewal_start_date || 0).getTime();
+  const normalizedTerms = terms
+    .map((term) => normalizeRenewalTerm(term))
+    .filter((term) => term && (term.renewal_start_date || term.renewal_end_date || term.created_at));
+
+  return normalizedTerms.sort((a, b) => {
+    const aStart = new Date(getTermStartDateValue(a) || 0).getTime();
+    const bStart = new Date(getTermStartDateValue(b) || 0).getTime();
     if (aStart !== bStart) {
       return aStart - bStart;
     }
@@ -203,7 +229,7 @@ function sortRenewalTerms(terms = []) {
 
 function getRenewalTimeline(row = {}) {
   const childRenewals = getRenewalsForSubscription(row.id);
-  const timeline = childRenewals.length ? childRenewals : [];
+  const timeline = childRenewals.length ? [...childRenewals] : [];
   const hasChildTerm = childRenewals.length > 0;
   const legacyTerm = getLegacyTermFromSubscription(row);
 
@@ -221,6 +247,10 @@ function getCurrentTerm(row = {}) {
   }
 
   return timeline[timeline.length - 1];
+}
+
+function getCurrentTermForSubscription(row = {}) {
+  return getCurrentTerm(row);
 }
 
 function getLatestRenewalForSubscription(subscriptionId) {
@@ -241,13 +271,13 @@ function getBaseEndDateValue(row = {}) {
 }
 
 function getCurrentTermStartDateValue(row = {}) {
-  const term = getCurrentTerm(row);
-  return term?.renewal_start_date || getBaseStartDateValue(row);
+  const term = getCurrentTermForSubscription(row);
+  return getTermStartDateValue(term) || getBaseStartDateValue(row);
 }
 
 function getCurrentTermEndDateValue(row = {}) {
-  const term = getCurrentTerm(row);
-  return term?.renewal_end_date || getBaseEndDateValue(row);
+  const term = getCurrentTermForSubscription(row);
+  return getTermEndDateValue(term) || getBaseEndDateValue(row);
 }
 
 function getTableRowDateRange(row = {}) {
@@ -520,15 +550,17 @@ function resolveLatestTermForStatus(subscription = {}, latestRenewal = null) {
 }
 
 function hasValidTermRange(term = {}) {
-  const startDate = parseDateStartOfDay(term?.renewal_start_date || term?.start_date || null);
-  const endDate = parseDateStartOfDay(term?.renewal_end_date || term?.end_date || null);
+  const normalizedTerm = normalizeRenewalTerm(term);
+  const startDate = parseDateStartOfDay(getTermStartDateValue(normalizedTerm));
+  const endDate = parseDateStartOfDay(getTermEndDateValue(normalizedTerm));
   return Boolean(startDate && endDate && endDate >= startDate);
 }
 
 function getLatestRenewedTermForStatus(subscription = {}, latestRenewal = null) {
   const timeline = getRenewalTimeline(subscription);
-  if (latestRenewal?.subscription_id === subscription?.id) {
-    timeline.push(latestRenewal);
+  const normalizedLatestRenewal = normalizeRenewalTerm(latestRenewal);
+  if (normalizedLatestRenewal?.subscription_id === subscription?.id) {
+    timeline.push(normalizedLatestRenewal);
   }
 
   const sorted = sortRenewalTerms(timeline);
@@ -1037,18 +1069,11 @@ async function loadUserManagement() {
 function buildRenewalsMap(rows = []) {
   const grouped = new Map();
   rows.forEach((row) => {
-    const subscriptionId = row.subscription_id;
+    const renewalRecord = normalizeRenewalTerm(row);
+    const subscriptionId = renewalRecord?.subscription_id;
     if (!subscriptionId) {
       return;
     }
-
-    const renewalRecord = {
-      ...row,
-      renewal_start_date: row.start_date || row.renewal_start_date || null,
-      renewal_end_date: row.end_date || row.renewal_end_date || null,
-      billing_cycle: row.billing_frequency || row.billing_cycle || null,
-      renewal_outcome: normalizeRenewalOutcome(row.renewal_outcome || row.outcome),
-    };
 
     if (!grouped.has(subscriptionId)) {
       grouped.set(subscriptionId, []);
@@ -1560,13 +1585,24 @@ function openRenewalModal(row) {
     return;
   }
 
+  const renewalTimeline = getRenewalTimeline(row);
+  const currentTerm = getCurrentTermForSubscription(row);
+  const fallbackStartDate = getCurrentTermEndDateValue(row) || "";
+  console.debug("openRenewalModal context", {
+    subscriptionId: row?.id || null,
+    renewalsLoaded: renewalTimeline.length,
+    currentTerm,
+    usedBaseFallback: !currentTerm,
+    fallbackStartDate,
+  });
+
   renewingSubscriptionId = row?.id || null;
   renewalTargetName.textContent = formatSubscriptionName(row);
   renewalFormError.textContent = "";
   renewalForm.reset();
   renewalForm.elements.billing_cycle.value = row?.billing_cycle || "1 year";
   renewalForm.elements.renewal_outcome.value = "renewed";
-  renewalForm.elements.renewal_start_date.value = getCurrentTermEndDateValue(row) || "";
+  renewalForm.elements.renewal_start_date.value = fallbackStartDate;
   updateRenewalFormMode();
   renewalDialog.showModal();
 }
