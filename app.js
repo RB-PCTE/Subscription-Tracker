@@ -95,8 +95,11 @@ const ROLE_PERMISSIONS = {
 };
 
 const SUBSCRIPTION_SORT_OPTIONS = {
-  "start-date-asc": { column: "start_date", ascending: true },
-  "start-date-desc": { column: "start_date", ascending: false },
+  // Base subscriptions no longer guarantee a persisted start_date column.
+  // Use created_at as the canonical server-side sort for list loading, then
+  // apply start-date presentation ordering client-side via derived term data.
+  "start-date-asc": { column: "created_at", ascending: true },
+  "start-date-desc": { column: "created_at", ascending: false },
   "name-asc": { column: "plan", ascending: true },
 };
 
@@ -1209,22 +1212,7 @@ async function loadSubscriptions({ source = "default" } = {}) {
   const baseQuery = supabase.from("subscriptions").select("*");
   const queryResult = await applySubscriptionsQueryFilters(baseQuery, queryInputs);
 
-  let data = null;
-  let error = null;
-
-  if (queryResult.error && queryResult.error.message?.toLowerCase().includes("column")) {
-    const legacyBaseQuery = supabase.from("subscriptions").select("*");
-    const legacySortQuery = applySubscriptionsQueryFilters(legacyBaseQuery, {
-      ...queryInputs,
-      selectedSort: queryInputs.selectedSort === "start-date-desc" ? "start-date-desc" : "start-date-asc",
-    }, { applySort: false }).order("renewal_date", { ascending: queryInputs.selectedSort !== "start-date-desc" });
-    const legacyResult = await legacySortQuery;
-    data = legacyResult.data;
-    error = legacyResult.error;
-  } else {
-    data = queryResult.data;
-    error = queryResult.error;
-  }
+  const { data, error } = queryResult;
 
   setBusyState(false);
 
