@@ -95,6 +95,7 @@ let managingSubscriptionId = null;
 let loadingSubscriptions = false;
 let activeView = "dashboard";
 let subscriptionsReloadTimer = null;
+let subscriptionsColumnInventory = new Set();
 
 const ROLE_PERMISSIONS = {
   admin: { canAdd: true, canEdit: true, canDelete: true, canManageUsers: true },
@@ -110,6 +111,18 @@ const SUBSCRIPTION_SORT_OPTIONS = {
   "start-date-desc": { column: "created_at", ascending: false },
   "name-asc": { column: "plan", ascending: true },
 };
+
+const SUBSCRIPTION_SEARCH_COLUMN_CANDIDATES = [
+  "plan",
+  "customer_company_name",
+  "customer_company",
+  "equipment_name",
+  "device_name",
+  "product_name",
+  "serial_number",
+  "subscription_name",
+  "name",
+];
 
 function getCurrentPermissions() {
   return ROLE_PERMISSIONS[currentUserRole] || { canAdd: false, canEdit: false, canDelete: false };
@@ -990,6 +1003,30 @@ function escapeSearchTermForPostgrest(searchTerm = "") {
     .trim();
 }
 
+function syncSubscriptionsColumnInventory(rows = []) {
+  const nextColumns = new Set();
+  rows.forEach((row) => {
+    if (!row || typeof row !== "object") {
+      return;
+    }
+
+    Object.keys(row).forEach((key) => {
+      if (key) {
+        nextColumns.add(key);
+      }
+    });
+  });
+
+  subscriptionsColumnInventory = nextColumns;
+  console.debug("subscriptions column inventory", Array.from(subscriptionsColumnInventory).sort());
+}
+
+function getSearchableSubscriptionColumns() {
+  return SUBSCRIPTION_SEARCH_COLUMN_CANDIDATES.filter((columnName) =>
+    subscriptionsColumnInventory.has(columnName)
+  );
+}
+
 function applySubscriptionsQueryFilters(baseQuery, queryInputs, { applySort = true } = {}) {
   let query = baseQuery;
   const { searchTerm, selectedFrequency, selectedSort } = queryInputs;
@@ -998,13 +1035,14 @@ function applySubscriptionsQueryFilters(baseQuery, queryInputs, { applySort = tr
     const escapedSearch = escapeSearchTermForPostgrest(searchTerm);
     if (escapedSearch) {
       const ilikeValue = `%${escapedSearch}%`;
-      const searchFilter = [
-        `plan.ilike.${ilikeValue}`,
-        `customer_company_name.ilike.${ilikeValue}`,
-        `equipment_name.ilike.${ilikeValue}`,
-        `serial_number.ilike.${ilikeValue}`,
-      ].join(",");
-      query = query.or(searchFilter);
+      const searchableColumns = getSearchableSubscriptionColumns();
+      console.debug("server-side search columns", { searchableColumns, searchTerm: escapedSearch });
+      if (searchableColumns.length > 0) {
+        const searchFilter = searchableColumns
+          .map((columnName) => `${columnName}.ilike.${ilikeValue}`)
+          .join(",");
+        query = query.or(searchFilter);
+      }
     }
   }
 
@@ -1034,6 +1072,7 @@ function setBusyState(isBusy) {
 
 function clearSubscriptions() {
   subscriptions = [];
+  subscriptionsColumnInventory = new Set();
   renewalsBySubscription = new Map();
   populateFilterOptions();
   subscriptionsBody.innerHTML = "";
@@ -1244,6 +1283,7 @@ async function loadSubscriptions({ source = "default" } = {}) {
   }
 
   console.debug("loadSubscriptions query result", { rows: data?.length || 0 });
+  syncSubscriptionsColumnInventory(data || []);
   subscriptions = (data || []).filter((row) => !!row && typeof row === "object");
   try {
     await loadRenewals();
