@@ -58,6 +58,7 @@ const generatedNamePreview = document.getElementById("generated-display-name");
 const formCalculatedStatus = document.getElementById("form-calculated-status");
 const renewalDialog = document.getElementById("renewal-dialog");
 const renewalForm = document.getElementById("renewal-form");
+const renewalDialogTitle = document.getElementById("renewal-dialog-title");
 const renewalTargetName = document.getElementById("renewal-target-name");
 const renewalFormError = document.getElementById("renewal-form-error");
 const renewalCalculatedStatus = document.getElementById("renewal-calculated-status");
@@ -68,6 +69,10 @@ const renewalEndDateField = document.getElementById("renewal-end-date-field");
 const renewalCalculatedStatusField = document.getElementById("renewal-calculated-status-field");
 const saveRenewalButton = document.getElementById("save-renewal-btn");
 const cancelRenewalButton = document.getElementById("cancel-renewal-btn");
+const manageRenewalsDialog = document.getElementById("manage-renewals-dialog");
+const manageRenewalsTitle = document.getElementById("manage-renewals-title");
+const manageRenewalsList = document.getElementById("manage-renewals-list");
+const closeManageRenewalsButton = document.getElementById("close-manage-renewals-btn");
 const detailDialog = document.getElementById("subscription-detail-dialog");
 const closeDetailButton = document.getElementById("close-detail-btn");
 const detailTitle = document.getElementById("detail-title");
@@ -84,6 +89,9 @@ let renewingSubscriptionId = null;
 let subscriptionModalMode = "create";
 let isSubmittingForm = false;
 let isSubmittingRenewalForm = false;
+let renewalFormMode = "create";
+let editingRenewalId = null;
+let managingSubscriptionId = null;
 let loadingSubscriptions = false;
 let activeView = "dashboard";
 let subscriptionsReloadTimer = null;
@@ -851,7 +859,7 @@ function renderSubscriptions(rows) {
     const actions = document.createElement("div");
     actions.className = "actions action-row";
 
-    const { canEdit, canDelete } = getCurrentPermissions();
+    const { canEdit, canDelete, canManageUsers } = getCurrentPermissions();
 
     const viewButton = document.createElement("button");
     viewButton.type = "button";
@@ -859,6 +867,7 @@ function renderSubscriptions(rows) {
     viewButton.dataset.action = "view";
     viewButton.dataset.id = row.id;
     viewButton.textContent = "View";
+    viewButton.title = "View read-only details and renewal history";
     actions.appendChild(viewButton);
 
     if (canEdit) {
@@ -868,6 +877,7 @@ function renderSubscriptions(rows) {
       editButton.dataset.action = "edit";
       editButton.dataset.id = row.id;
       editButton.textContent = "Edit";
+      editButton.title = "Edit subscription details";
       actions.appendChild(editButton);
 
       const renewButton = document.createElement("button");
@@ -876,7 +886,18 @@ function renderSubscriptions(rows) {
       renewButton.dataset.action = "renew";
       renewButton.dataset.id = row.id;
       renewButton.textContent = "Renew";
+      renewButton.title = "Create a new renewal event";
       actions.appendChild(renewButton);
+    }
+
+    if (canManageUsers) {
+      const manageRenewalsButton = document.createElement("button");
+      manageRenewalsButton.type = "button";
+      manageRenewalsButton.className = "secondary table-action";
+      manageRenewalsButton.dataset.action = "manage-renewals";
+      manageRenewalsButton.dataset.id = row.id;
+      manageRenewalsButton.textContent = "Manage renewals";
+      actions.appendChild(manageRenewalsButton);
     }
 
     if (canDelete) {
@@ -1655,6 +1676,10 @@ function openRenewalModal(row) {
   });
 
   renewingSubscriptionId = row?.id || null;
+  renewalFormMode = "create";
+  editingRenewalId = null;
+  renewalDialogTitle.textContent = "Renew subscription";
+  saveRenewalButton.textContent = "Save renewal";
   renewalTargetName.textContent = formatSubscriptionName(row);
   renewalFormError.textContent = "";
   renewalForm.reset();
@@ -1665,6 +1690,114 @@ function openRenewalModal(row) {
   renewalDialog.showModal();
 }
 
+function openEditRenewalModal(subscription, term) {
+  const { canManageUsers } = getCurrentPermissions();
+  if (!canManageUsers) {
+    setSubscriptionStatus("Only admins can edit existing renewal records.", true);
+    return;
+  }
+
+  renewingSubscriptionId = subscription?.id || null;
+  renewalFormMode = "edit";
+  editingRenewalId = term?.id || null;
+  renewalDialogTitle.textContent = "Edit renewal";
+  saveRenewalButton.textContent = "Save changes";
+  renewalTargetName.textContent = formatSubscriptionName(subscription);
+  renewalFormError.textContent = "";
+  renewalForm.reset();
+  ensureSelectHasOption(renewalForm.elements.billing_cycle, term?.billing_cycle || subscription?.billing_cycle || "1 year");
+  renewalForm.elements.billing_cycle.value = term?.billing_cycle || subscription?.billing_cycle || "1 year";
+  renewalForm.elements.renewal_outcome.value = normalizeRenewalOutcome(term?.renewal_outcome || "renewed");
+  renewalForm.elements.renewal_start_date.value = term?.renewal_start_date || "";
+  renewalForm.elements.notes.value = term?.notes || "";
+  updateRenewalFormMode();
+  renewalDialog.showModal();
+}
+
+function openManageRenewalsModal(row) {
+  const { canManageUsers } = getCurrentPermissions();
+  if (!canManageUsers) {
+    setSubscriptionStatus("Only admins can manage renewal records.", true);
+    return;
+  }
+
+  managingSubscriptionId = row?.id || null;
+  manageRenewalsTitle.textContent = `Manage renewals — ${formatSubscriptionName(row)}`;
+  renderManageRenewalsList();
+  manageRenewalsDialog.showModal();
+}
+
+function renderManageRenewalsList() {
+  if (!managingSubscriptionId) {
+    manageRenewalsList.innerHTML = '<article class="renewal-item"><p>No subscription selected.</p></article>';
+    return;
+  }
+
+  const subscription = subscriptions.find((item) => item.id === managingSubscriptionId);
+  const terms = getRenewalsForSubscription(managingSubscriptionId);
+
+  if (!terms.length) {
+    manageRenewalsList.innerHTML = '<article class="renewal-item"><p>No renewal records yet.</p></article>';
+    return;
+  }
+
+  manageRenewalsList.innerHTML = "";
+  terms.forEach((term, index) => {
+    const item = document.createElement("article");
+    item.className = "renewal-item";
+    item.innerHTML = `<p><strong>Term ${index + 1}</strong> • ${toStatusLabel(term.renewal_outcome || "renewed")}</p>
+      <p>${formatDate(term.renewal_start_date)} → ${formatDate(term.renewal_end_date)}</p>
+      <p>${term.notes || "No notes"}</p>`;
+
+    const actions = document.createElement("div");
+    actions.className = "actions";
+
+    const editButton = document.createElement("button");
+    editButton.type = "button";
+    editButton.className = "secondary";
+    editButton.dataset.action = "edit-renewal";
+    editButton.dataset.id = term.id;
+    editButton.textContent = "Edit renewal";
+    actions.appendChild(editButton);
+
+    const deleteButton = document.createElement("button");
+    deleteButton.type = "button";
+    deleteButton.className = "secondary danger-action";
+    deleteButton.dataset.action = "delete-renewal";
+    deleteButton.dataset.id = term.id;
+    deleteButton.textContent = "Delete renewal";
+    actions.appendChild(deleteButton);
+
+    item.appendChild(actions);
+    manageRenewalsList.appendChild(item);
+  });
+
+  manageRenewalsList.dataset.subscriptionId = subscription?.id || "";
+}
+
+async function deleteRenewalRecord(renewalId) {
+  const { canManageUsers } = getCurrentPermissions();
+  if (!canManageUsers) {
+    setSubscriptionStatus("Only admins can delete renewal records.", true);
+    return;
+  }
+
+  const confirmed = window.confirm("Delete this renewal record? This action cannot be undone.");
+  if (!confirmed) {
+    return;
+  }
+
+  const { error } = await supabase.from("subscription_renewals").delete().eq("id", renewalId);
+  if (error) {
+    setSubscriptionStatus(`Unable to delete renewal: ${error.message}`, true);
+    return;
+  }
+
+  setSubscriptionStatus("Renewal record deleted.");
+  await loadSubscriptions();
+  renderManageRenewalsList();
+}
+
 async function saveRenewal(event) {
   event.preventDefault();
 
@@ -1672,8 +1805,9 @@ async function saveRenewal(event) {
     return;
   }
 
-  const { canEdit } = getCurrentPermissions();
-  if (!canEdit) {
+  const { canEdit, canManageUsers } = getCurrentPermissions();
+  const canSubmit = renewalFormMode === "edit" ? canManageUsers : canEdit;
+  if (!canSubmit) {
     renewalFormError.textContent = "Your role is not allowed to renew subscriptions.";
     return;
   }
@@ -1699,7 +1833,10 @@ async function saveRenewal(event) {
   saveRenewalButton.disabled = true;
   renewalFormError.textContent = "";
 
-  const { error } = await supabase.from("subscription_renewals").insert(payload);
+  const request = renewalFormMode === "edit" && editingRenewalId
+    ? supabase.from("subscription_renewals").update(payload).eq("id", editingRenewalId)
+    : supabase.from("subscription_renewals").insert(payload);
+  const { error } = await request;
 
   isSubmittingRenewalForm = false;
   saveRenewalButton.disabled = false;
@@ -1710,9 +1847,14 @@ async function saveRenewal(event) {
   }
 
   renewalDialog.close();
-  setSubscriptionStatus("Renewal saved.");
+  setSubscriptionStatus(renewalFormMode === "edit" ? "Renewal updated." : "Renewal saved.");
   renewingSubscriptionId = null;
+  editingRenewalId = null;
+  renewalFormMode = "create";
   await loadSubscriptions();
+  if (manageRenewalsDialog.open) {
+    renderManageRenewalsList();
+  }
 }
 
 async function saveSubscription(event) {
@@ -1901,8 +2043,39 @@ function handleTableClick(event) {
     openRenewalModal(row);
   }
 
+  if (action === "manage-renewals" && row) {
+    openManageRenewalsModal(row);
+  }
+
   if (action === "delete") {
     void deleteSubscription(id);
+  }
+}
+
+function handleManageRenewalsClick(event) {
+  const button = event.target.closest("button[data-action]");
+  if (!button?.dataset.action || !button.dataset.id) {
+    return;
+  }
+
+  const action = button.dataset.action;
+  const renewalId = button.dataset.id;
+  const terms = getRenewalsForSubscription(managingSubscriptionId);
+  const term = terms.find((item) => item.id === renewalId);
+  const subscription = subscriptions.find((item) => item.id === managingSubscriptionId);
+
+  if (!term || !subscription) {
+    setSubscriptionStatus("Unable to find that renewal record.", true);
+    return;
+  }
+
+  if (action === "edit-renewal") {
+    openEditRenewalModal(subscription, term);
+    return;
+  }
+
+  if (action === "delete-renewal") {
+    void deleteRenewalRecord(renewalId);
   }
 }
 
@@ -2288,6 +2461,14 @@ renewalForm.addEventListener("submit", saveRenewal);
   renewalForm.elements[fieldName]?.addEventListener("change", handler);
 });
 cancelRenewalButton.addEventListener("click", () => renewalDialog.close());
+renewalDialog.addEventListener("close", () => {
+  renewalFormMode = "create";
+  editingRenewalId = null;
+  saveRenewalButton.textContent = "Save renewal";
+  renewalDialogTitle.textContent = "Renew subscription";
+});
+closeManageRenewalsButton.addEventListener("click", () => manageRenewalsDialog.close());
+manageRenewalsList.addEventListener("click", handleManageRenewalsClick);
 closeDetailButton.addEventListener("click", () => detailDialog.close());
 inviteForm.addEventListener("submit", grantAccess);
 invitesBody.addEventListener("click", handleInvitesClick);

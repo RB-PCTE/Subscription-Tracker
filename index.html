@@ -353,7 +353,7 @@
 
     <dialog id="renewal-dialog">
       <form id="renewal-form" method="dialog" novalidate>
-        <h3>Renew subscription</h3>
+        <h3 id="renewal-dialog-title">Renew subscription</h3>
         <p class="helper-text">
           Update the renewal outcome for <strong id="renewal-target-name">—</strong>.
         </p>
@@ -415,6 +415,17 @@
       </form>
     </dialog>
 
+    <dialog id="manage-renewals-dialog">
+      <article class="detail-layout">
+        <header class="detail-header">
+          <h3 id="manage-renewals-title">Manage renewals</h3>
+          <button id="close-manage-renewals-btn" type="button" class="secondary">Close</button>
+        </header>
+        <p class="helper-text">Admin-only workflow for correcting or deleting renewal records.</p>
+        <div id="manage-renewals-list" class="renewals-list"></div>
+      </article>
+    </dialog>
+
     <dialog id="subscription-detail-dialog">
       <article class="detail-layout">
         <header class="detail-header">
@@ -434,6 +445,7 @@
 
         <section>
           <h4>Renewal history</h4>
+          <p class="helper-text">Read-only history. Use Renew to add a new event; corrections are admin-only workflows.</p>
           <div id="detail-renewal-history" class="renewals-list"></div>
         </section>
       </article>
