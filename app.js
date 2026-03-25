@@ -859,6 +859,7 @@ function renderSubscriptions(rows) {
     viewButton.dataset.action = "view";
     viewButton.dataset.id = row.id;
     viewButton.textContent = "View";
+    viewButton.title = "View read-only details and renewal history";
     actions.appendChild(viewButton);
 
     if (canEdit) {
@@ -868,6 +869,7 @@ function renderSubscriptions(rows) {
       editButton.dataset.action = "edit";
       editButton.dataset.id = row.id;
       editButton.textContent = "Edit";
+      editButton.title = "Edit subscription details";
       actions.appendChild(editButton);
 
       const renewButton = document.createElement("button");
@@ -876,6 +878,7 @@ function renderSubscriptions(rows) {
       renewButton.dataset.action = "renew";
       renewButton.dataset.id = row.id;
       renewButton.textContent = "Renew";
+      renewButton.title = "Create a new renewal event";
       actions.appendChild(renewButton);
     }
 
