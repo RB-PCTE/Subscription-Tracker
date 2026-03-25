@@ -61,6 +61,11 @@ const renewalForm = document.getElementById("renewal-form");
 const renewalTargetName = document.getElementById("renewal-target-name");
 const renewalFormError = document.getElementById("renewal-form-error");
 const renewalCalculatedStatus = document.getElementById("renewal-calculated-status");
+const renewalOutcomeHelper = document.getElementById("renewal-outcome-helper");
+const renewalEffectiveDateField = document.getElementById("renewal-effective-date-field");
+const renewalBillingCycleField = document.getElementById("renewal-billing-cycle-field");
+const renewalEndDateField = document.getElementById("renewal-end-date-field");
+const renewalCalculatedStatusField = document.getElementById("renewal-calculated-status-field");
 const saveRenewalButton = document.getElementById("save-renewal-btn");
 const cancelRenewalButton = document.getElementById("cancel-renewal-btn");
 const detailDialog = document.getElementById("subscription-detail-dialog");
@@ -231,14 +236,31 @@ function getEndDateValue(row = {}) {
 function normalizeRenewalOutcome(value) {
   const normalized = (value || "").toString().trim().toLowerCase();
   if (!normalized) {
-    return "pending";
+    return "renewed";
   }
 
   if (["renewed", "churned", "migrated", "pending"].includes(normalized)) {
     return normalized;
   }
 
-  return "pending";
+  return "renewed";
+}
+
+function isRenewedOutcome(outcome) {
+  return normalizeRenewalOutcome(outcome) === "renewed";
+}
+
+function getRenewalOutcomeHelperText(outcome) {
+  const normalizedOutcome = normalizeRenewalOutcome(outcome);
+  if (normalizedOutcome === "churned") {
+    return "Churned ends this subscription on the effective date. No new term will be created.";
+  }
+
+  if (normalizedOutcome === "migrated") {
+    return "Migrated ends this subscription on the effective date because it was replaced or moved.";
+  }
+
+  return "Renewed creates the next term from the effective date and calculates the next end date.";
 }
 
 function formatSubscriptionName(row) {
@@ -470,12 +492,17 @@ function calculateSubscriptionStatus(row, today = new Date()) {
   const currentTerm = getCurrentTerm(row);
   const legacyStatus = (row.status || "unknown").toString().trim().toLowerCase() || "unknown";
   const outcome = normalizeRenewalOutcome(currentTerm?.renewal_outcome || row.renewal_outcome);
+  const effectiveDate = parseDateStartOfDay(currentTerm?.renewal_start_date || row.start_date || row.renewal_date);
   const endDate = parseDateStartOfDay(currentTerm?.renewal_end_date || getEndDateValue(row));
   const normalizedToday = parseDateStartOfDay(today) || new Date();
   normalizedToday.setHours(0, 0, 0, 0);
 
-  if (outcome === "migrated") {
-    return "migrated";
+  if (outcome === "migrated" || outcome === "churned") {
+    if (effectiveDate && normalizedToday < effectiveDate) {
+      return "active";
+    }
+
+    return outcome;
   }
 
   if (!endDate) {
@@ -1326,13 +1353,34 @@ function openSubscriptionDetail(row) {
 }
 
 function updateRenewalPreview() {
-  const startDate = renewalForm.elements.renewal_start_date?.value || null;
-  const billingCycle = renewalForm.elements.billing_cycle?.value || null;
+  const startDate = (renewalForm.elements.renewal_start_date?.value || "").trim() || null;
+  const billingCycle = (renewalForm.elements.billing_cycle?.value || "").trim() || null;
   const outcome = normalizeRenewalOutcome(renewalForm.elements.renewal_outcome?.value);
-  const endDate = calculateSubscriptionEndDate({ start_date: startDate, billing_cycle: billingCycle });
+  const shouldCreateNextTerm = isRenewedOutcome(outcome);
+  const endDate = shouldCreateNextTerm ? calculateSubscriptionEndDate({ start_date: startDate, billing_cycle: billingCycle }) : null;
 
   renewalForm.elements.renewal_end_date.value = endDate || "";
-  renewalCalculatedStatus.value = toStatusLabel(calculateSubscriptionStatus({ end_date: endDate, renewal_outcome: outcome }));
+  renewalCalculatedStatus.value = toStatusLabel(
+    calculateSubscriptionStatus({
+      start_date: startDate,
+      end_date: endDate,
+      renewal_outcome: outcome,
+    }),
+  );
+}
+
+function updateRenewalFormVisibility() {
+  const outcome = normalizeRenewalOutcome(renewalForm.elements.renewal_outcome?.value);
+  const shouldCreateNextTerm = isRenewedOutcome(outcome);
+
+  renewalBillingCycleField.hidden = !shouldCreateNextTerm;
+  renewalEndDateField.hidden = !shouldCreateNextTerm;
+  renewalCalculatedStatusField.hidden = !shouldCreateNextTerm;
+  renewalEffectiveDateField.querySelector("input")?.toggleAttribute("required", true);
+  renewalForm.elements.billing_cycle?.toggleAttribute("required", shouldCreateNextTerm);
+  renewalOutcomeHelper.textContent = getRenewalOutcomeHelperText(outcome);
+
+  updateRenewalPreview();
 }
 
 function openRenewalModal(row) {
@@ -1347,9 +1395,9 @@ function openRenewalModal(row) {
   renewalFormError.textContent = "";
   renewalForm.reset();
   renewalForm.elements.billing_cycle.value = row?.billing_cycle || "1 year";
-  renewalForm.elements.renewal_outcome.value = "pending";
+  renewalForm.elements.renewal_outcome.value = "renewed";
   renewalForm.elements.renewal_start_date.value = getEndDateValue(row) || "";
-  updateRenewalPreview();
+  updateRenewalFormVisibility();
   renewalDialog.showModal();
 }
 
@@ -1369,11 +1417,17 @@ async function saveRenewal(event) {
   const startDate = (renewalForm.elements.renewal_start_date.value || "").trim();
   const billingCycle = (renewalForm.elements.billing_cycle.value || "").trim();
   const outcome = normalizeRenewalOutcome(renewalForm.elements.renewal_outcome.value);
+  const shouldCreateNextTerm = isRenewedOutcome(outcome);
   const notes = (renewalForm.elements.notes.value || "").trim() || null;
-  const endDate = calculateSubscriptionEndDate({ start_date: startDate, billing_cycle: billingCycle });
+  const endDate = shouldCreateNextTerm ? calculateSubscriptionEndDate({ start_date: startDate, billing_cycle: billingCycle }) : null;
 
-  if (!startDate || !billingCycle || !endDate) {
-    renewalFormError.textContent = "Provide renewal start date and billing frequency.";
+  if (!startDate) {
+    renewalFormError.textContent = "Provide an effective date.";
+    return;
+  }
+
+  if (shouldCreateNextTerm && (!billingCycle || !endDate)) {
+    renewalFormError.textContent = "Provide effective date and billing frequency for a renewed subscription.";
     return;
   }
 
@@ -1384,12 +1438,14 @@ async function saveRenewal(event) {
   const renewalPayload = {
     subscription_id: renewingSubscriptionId,
     start_date: startDate,
-    end_date: endDate,
-    billing_frequency: billingCycle,
     renewal_outcome: outcome,
-    status: calculateSubscriptionStatus({ end_date: endDate, renewal_outcome: outcome }),
+    status: calculateSubscriptionStatus({ start_date: startDate, end_date: endDate, renewal_outcome: outcome }),
     notes,
   };
+  if (shouldCreateNextTerm) {
+    renewalPayload.end_date = endDate;
+    renewalPayload.billing_frequency = billingCycle;
+  }
 
   let { error } = await supabase.from("subscription_renewals").insert(renewalPayload);
 
@@ -1397,12 +1453,14 @@ async function saveRenewal(event) {
     const legacyRenewalPayload = {
       subscription_id: renewingSubscriptionId,
       renewal_start_date: startDate,
-      renewal_end_date: endDate,
-      billing_cycle: billingCycle,
       renewal_outcome: outcome,
       status: renewalPayload.status,
       notes,
     };
+    if (shouldCreateNextTerm) {
+      legacyRenewalPayload.renewal_end_date = endDate;
+      legacyRenewalPayload.billing_cycle = billingCycle;
+    }
     ({ error } = await supabase.from("subscription_renewals").insert(legacyRenewalPayload));
   }
 
@@ -1969,8 +2027,9 @@ subscriptionForm.addEventListener("submit", saveSubscription);
 cancelSubscriptionButton.addEventListener("click", () => subscriptionDialog.close());
 renewalForm.addEventListener("submit", saveRenewal);
 ["renewal_start_date", "billing_cycle", "renewal_outcome"].forEach((fieldName) => {
-  renewalForm.elements[fieldName]?.addEventListener("input", updateRenewalPreview);
-  renewalForm.elements[fieldName]?.addEventListener("change", updateRenewalPreview);
+  const handler = fieldName === "renewal_outcome" ? updateRenewalFormVisibility : updateRenewalPreview;
+  renewalForm.elements[fieldName]?.addEventListener("input", handler);
+  renewalForm.elements[fieldName]?.addEventListener("change", handler);
 });
 cancelRenewalButton.addEventListener("click", () => renewalDialog.close());
 closeDetailButton.addEventListener("click", () => detailDialog.close());

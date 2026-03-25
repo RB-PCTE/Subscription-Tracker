@@ -355,18 +355,21 @@
       <form id="renewal-form" method="dialog" novalidate>
         <h3>Renew subscription</h3>
         <p class="helper-text">
-          Create the next term for <strong id="renewal-target-name">—</strong>.
+          Update the renewal outcome for <strong id="renewal-target-name">—</strong>.
+        </p>
+        <p id="renewal-outcome-helper" class="helper-text">
+          Renewed creates the next term. Churned and migrated end this subscription on the effective date.
         </p>
 
         <fieldset class="form-group">
           <legend>Renewal term</legend>
 
-          <label>
-            Renewal start date
+          <label id="renewal-effective-date-field">
+            Effective date
             <input id="renewal-start-date" name="renewal_start_date" type="date" required />
           </label>
 
-          <label>
+          <label id="renewal-billing-cycle-field">
             Billing frequency
             <select id="renewal-billing-cycle" name="billing_cycle">
               <option value="1 year">1 year</option>
@@ -375,7 +378,7 @@
             </select>
           </label>
 
-          <label>
+          <label id="renewal-end-date-field">
             Renewal end date (calculated)
             <input id="renewal-end-date" name="renewal_end_date" type="date" readonly aria-readonly="true" />
           </label>
@@ -383,14 +386,13 @@
           <label>
             Renewal outcome
             <select id="renewal-outcome" name="renewal_outcome">
-              <option value="pending">pending</option>
-              <option value="renewed">renewed</option>
-              <option value="churned">churned</option>
-              <option value="migrated">migrated</option>
+              <option value="renewed">Renewed</option>
+              <option value="churned">Churned</option>
+              <option value="migrated">Migrated</option>
             </select>
           </label>
 
-          <label>
+          <label id="renewal-calculated-status-field">
             Calculated status
             <input id="renewal-calculated-status" name="renewal_calculated_status" readonly aria-readonly="true" />
           </label>
