@@ -488,14 +488,26 @@ function subtractMonthsClamped(dateInput, monthsToSubtract) {
   return new Date(firstOfTargetMonth.getFullYear(), firstOfTargetMonth.getMonth(), clampedDay);
 }
 
+function resolveLatestTermForStatus(subscription = {}, latestRenewal = null) {
+  if (latestRenewal) {
+    return latestRenewal;
+  }
+
+  if (subscription?.id) {
+    const childLatestRenewal = getLatestRenewalForSubscription(subscription.id);
+    if (childLatestRenewal) {
+      return childLatestRenewal;
+    }
+  }
+
+  return getCurrentTerm(subscription);
+}
+
 function calculateSubscriptionStatus(subscription = {}, latestRenewal = null, today = new Date()) {
   console.debug("calculateSubscriptionStatus", { id: subscription?.id, today: toIsoDateString(today) });
-  const resolvedLatestRenewal =
-    latestRenewal ||
-    getLatestRenewalForSubscription(subscription.id) ||
-    getCurrentTerm(subscription);
+  const resolvedLatestRenewal = resolveLatestTermForStatus(subscription, latestRenewal);
   const legacyStatus = (subscription.status || "unknown").toString().trim().toLowerCase() || "unknown";
-  const outcome = normalizeRenewalOutcome(resolvedLatestRenewal?.renewal_outcome || subscription.renewal_outcome);
+  const outcome = normalizeRenewalOutcome(resolvedLatestRenewal?.renewal_outcome || "renewed");
   const effectiveDate = parseDateStartOfDay(
     resolvedLatestRenewal?.renewal_start_date || subscription.start_date || subscription.renewal_date,
   );
@@ -1484,19 +1496,6 @@ async function saveRenewal(event) {
 
   if (error) {
     renewalFormError.textContent = `Unable to save renewal: ${error.message}`;
-    return;
-  }
-
-  const { error: parentUpdateError } = await supabase
-    .from("subscriptions")
-    .update({
-      renewal_outcome: outcome,
-      status: calculateSubscriptionStatus(payload),
-    })
-    .eq("id", renewingSubscriptionId);
-
-  if (parentUpdateError) {
-    renewalFormError.textContent = `Renewal saved but parent status update failed: ${parentUpdateError.message}`;
     return;
   }
 
