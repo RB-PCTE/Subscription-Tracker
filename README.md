@@ -60,7 +60,7 @@ The complete migration (table, FK, indexes, `updated_at` trigger, RLS, and polic
 
 The UI treats `public.subscriptions` as parent/master records and `public.subscription_renewals` as child term events. Existing deployments without the renewals table still load subscription data; renewals are simply unavailable until the table is created.
 
-Legacy columns such as `vendor_name`, `cost_amount`, `cost_currency`, or `renewal_date` can remain in older databases for backwards compatibility, but the current UI no longer writes or displays vendor/cost and uses **start date** wording.
+Legacy columns such as `cost_amount`, `cost_currency`, or `renewal_date` can remain in older databases for backwards compatibility, but the current UI no longer writes or displays cost and uses **start date** wording.
 
 Enable RLS and add policies so authenticated users can read and write rows needed by this app (select, insert, update, delete).
 
