@@ -232,14 +232,29 @@ function getLatestRenewalForSubscription(subscriptionId) {
   return renewals.length ? renewals[renewals.length - 1] : null;
 }
 
-function getStartDateValue(row = {}) {
-  const term = getCurrentTerm(row);
-  return term?.renewal_start_date || row.start_date || row.renewal_date || null;
+function getBaseStartDateValue(row = {}) {
+  return row.start_date || row.renewal_date || null;
 }
 
-function getEndDateValue(row = {}) {
+function getBaseEndDateValue(row = {}) {
+  return row.end_date || calculateSubscriptionEndDate(row) || null;
+}
+
+function getCurrentTermStartDateValue(row = {}) {
   const term = getCurrentTerm(row);
-  return term?.renewal_end_date || row.end_date || calculateSubscriptionEndDate(row) || null;
+  return term?.renewal_start_date || getBaseStartDateValue(row);
+}
+
+function getCurrentTermEndDateValue(row = {}) {
+  const term = getCurrentTerm(row);
+  return term?.renewal_end_date || getBaseEndDateValue(row);
+}
+
+function getTableRowDateRange(row = {}) {
+  return {
+    startDate: getBaseStartDateValue(row),
+    endDate: getBaseEndDateValue(row),
+  };
 }
 
 function normalizeRenewalOutcome(value) {
@@ -613,9 +628,9 @@ function safeCalculateSubscriptionStatus(row) {
 
 function safeGetEndDateValue(row) {
   try {
-    return getEndDateValue(row);
+    return getCurrentTermEndDateValue(row);
   } catch (error) {
-    console.error("getEndDateValue failed", { error, row });
+    console.error("getCurrentTermEndDateValue failed", { error, row });
     return row?.end_date || null;
   }
 }
@@ -664,7 +679,11 @@ function getFilteredSubscriptions() {
   const sorted = [...filtered];
   switch (sortControl.value) {
     case "start-date-desc":
-      sorted.sort((a, b) => new Date(getStartDateValue(b) || 0).getTime() - new Date(getStartDateValue(a) || 0).getTime());
+      sorted.sort(
+        (a, b) =>
+          new Date(getTableRowDateRange(b).startDate || 0).getTime() -
+          new Date(getTableRowDateRange(a).startDate || 0).getTime(),
+      );
       break;
     case "status-asc":
       sorted.sort((a, b) => toStatusLabel(safeCalculateSubscriptionStatus(a)).localeCompare(toStatusLabel(safeCalculateSubscriptionStatus(b))));
@@ -673,7 +692,11 @@ function getFilteredSubscriptions() {
       sorted.sort((a, b) => formatSubscriptionName(a).localeCompare(formatSubscriptionName(b)));
       break;
     default:
-      sorted.sort((a, b) => new Date(getStartDateValue(a) || 0).getTime() - new Date(getStartDateValue(b) || 0).getTime());
+      sorted.sort(
+        (a, b) =>
+          new Date(getTableRowDateRange(a).startDate || 0).getTime() -
+          new Date(getTableRowDateRange(b).startDate || 0).getTime(),
+      );
       break;
   }
 
@@ -725,13 +748,12 @@ function renderSubscriptions(rows) {
     tr.appendChild(cycleTd);
 
     const startDateTd = document.createElement("td");
-    const startDate = getStartDateValue(row);
+    const { startDate, endDate } = getTableRowDateRange(row);
     startDateTd.textContent = formatDate(startDate) || "No start date";
     startDateTd.className = `renewal-cell ${getStartDateUrgency(row)}`;
     tr.appendChild(startDateTd);
 
     const endDateTd = document.createElement("td");
-    const endDate = safeGetEndDateValue(row);
     endDateTd.textContent = formatDate(endDate) || "No end date";
     tr.appendChild(endDateTd);
 
@@ -809,8 +831,8 @@ function renderRenewalsPanel() {
   }
 
   const upcomingRows = subscriptions
-    .filter((row) => getEndDateValue(row))
-    .sort((a, b) => new Date(getEndDateValue(a)).getTime() - new Date(getEndDateValue(b)).getTime())
+    .filter((row) => getCurrentTermEndDateValue(row))
+    .sort((a, b) => new Date(getCurrentTermEndDateValue(a)).getTime() - new Date(getCurrentTermEndDateValue(b)).getTime())
     .slice(0, 6);
 
   if (!upcomingRows.length) {
@@ -821,7 +843,7 @@ function renderRenewalsPanel() {
   renewalsList.innerHTML = "";
 
   upcomingRows.forEach((row) => {
-    const endDate = getEndDateValue(row);
+    const endDate = getCurrentTermEndDateValue(row);
     const item = document.createElement("article");
     item.className = "renewal-item";
     item.innerHTML = `<p><strong>${formatSubscriptionName(row)}</strong> • ${row.plan || "No plan"}</p><p>${formatDate(
@@ -1122,6 +1144,60 @@ async function insertSubscriptionWithFallback(payload) {
   }
 
   return new Error("Unable to save subscription: schema mismatch fallback exhausted.");
+}
+
+async function updateSubscription(subscriptionId, payload) {
+  let workingPayload = { ...payload };
+  let attempts = 0;
+
+  while (attempts < 8) {
+    attempts += 1;
+    console.debug("updateSubscription attempt", { attempts, subscriptionId, payload: workingPayload });
+    const { data, error } = await supabase
+      .from("subscriptions")
+      .update(workingPayload)
+      .eq("id", subscriptionId)
+      .select("*")
+      .single();
+
+    if (!error) {
+      return { data, error: null };
+    }
+
+    const missingColumn = extractMissingColumnName(error.message || "");
+    if (!missingColumn || !(missingColumn in workingPayload)) {
+      return { data: null, error };
+    }
+
+    console.warn("updateSubscription dropping missing column", { missingColumn });
+    delete workingPayload[missingColumn];
+  }
+
+  return { data: null, error: new Error("Unable to update subscription: schema mismatch fallback exhausted.") };
+}
+
+function replaceSubscriptionInState(updatedRow) {
+  if (!updatedRow?.id) {
+    return;
+  }
+
+  const existingIndex = subscriptions.findIndex((subscription) => subscription.id === updatedRow.id);
+  if (existingIndex === -1) {
+    subscriptions = [updatedRow, ...subscriptions];
+    return;
+  }
+
+  subscriptions[existingIndex] = {
+    ...subscriptions[existingIndex],
+    ...updatedRow,
+  };
+}
+
+function refreshSubscriptionViews() {
+  populateFilterOptions();
+  refreshVisibleSubscriptions();
+  renderRenewalsPanel();
+  updateDashboardMetrics();
 }
 
 function openAddForm() {
@@ -1450,7 +1526,7 @@ function openRenewalModal(row) {
   renewalForm.reset();
   renewalForm.elements.billing_cycle.value = row?.billing_cycle || "1 year";
   renewalForm.elements.renewal_outcome.value = "renewed";
-  renewalForm.elements.renewal_start_date.value = getEndDateValue(row) || "";
+  renewalForm.elements.renewal_start_date.value = getCurrentTermEndDateValue(row) || "";
   updateRenewalFormMode();
   renewalDialog.showModal();
 }
@@ -1529,7 +1605,7 @@ async function saveSubscription(event) {
 
   try {
     payload = getFormPayload();
-    console.debug("createSubscription payload", payload);
+    console.debug("saveSubscription payload", payload);
   } catch (error) {
     formError.textContent = error.message;
     return;
@@ -1544,10 +1620,15 @@ async function saveSubscription(event) {
   saveSubscriptionButton.disabled = true;
 
   if (editingSubscriptionId) {
-    let { error } = await supabase.from("subscriptions").update(payload).eq("id", editingSubscriptionId);
+    console.debug("saveSubscription update request", { subscriptionId: editingSubscriptionId, payload });
+    let { data: updatedRow, error } = await updateSubscription(editingSubscriptionId, payload);
 
     if (error && error.message?.toLowerCase().includes("column")) {
-      ({ error } = await supabase.from("subscriptions").update(toLegacyPayload(payload)).eq("id", editingSubscriptionId));
+      console.debug("saveSubscription update fallback payload", {
+        subscriptionId: editingSubscriptionId,
+        payload: toLegacyPayload(payload),
+      });
+      ({ data: updatedRow, error } = await updateSubscription(editingSubscriptionId, toLegacyPayload(payload)));
     }
 
     if (error) {
@@ -1555,6 +1636,14 @@ async function saveSubscription(event) {
       isSubmittingForm = false;
       saveSubscriptionButton.disabled = false;
       return;
+    }
+
+    console.debug("saveSubscription update response", { subscriptionId: editingSubscriptionId, updatedRow });
+    if (updatedRow) {
+      replaceSubscriptionInState(updatedRow);
+      refreshSubscriptionViews();
+    } else {
+      await loadSubscriptions();
     }
 
     subscriptionDialog.close();
@@ -1610,7 +1699,9 @@ async function saveSubscription(event) {
 
   isSubmittingForm = false;
   saveSubscriptionButton.disabled = false;
-  await loadSubscriptions();
+  if (!editingSubscriptionId) {
+    await loadSubscriptions();
+  }
 }
 
 async function deleteSubscription(id) {
