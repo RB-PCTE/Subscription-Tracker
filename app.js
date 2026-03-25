@@ -245,6 +245,10 @@ function sortRenewalTerms(terms = []) {
   });
 }
 
+function sortRenewalTermsNewestFirst(terms = []) {
+  return [...sortRenewalTerms(terms)].reverse();
+}
+
 function getRenewalTimeline(row = {}) {
   const childRenewals = getRenewalsForSubscription(row.id);
   const timeline = childRenewals.length ? [...childRenewals] : [];
@@ -1734,7 +1738,7 @@ function renderManageRenewalsList() {
   }
 
   const subscription = subscriptions.find((item) => item.id === managingSubscriptionId);
-  const terms = getRenewalsForSubscription(managingSubscriptionId);
+  const terms = sortRenewalTermsNewestFirst(getRenewalsForSubscription(managingSubscriptionId));
 
   if (!terms.length) {
     manageRenewalsList.innerHTML = '<article class="renewal-item"><p>No renewal records yet.</p></article>';
@@ -1745,7 +1749,7 @@ function renderManageRenewalsList() {
   terms.forEach((term, index) => {
     const item = document.createElement("article");
     item.className = "renewal-item";
-    item.innerHTML = `<p><strong>Term ${index + 1}</strong> • ${toStatusLabel(term.renewal_outcome || "renewed")}</p>
+    item.innerHTML = `<p><strong>Renewal ${index + 1}</strong> • ${toStatusLabel(term.renewal_outcome || "renewed")}</p>
       <p>${formatDate(term.renewal_start_date)} → ${formatDate(term.renewal_end_date)}</p>
       <p>${term.notes || "No notes"}</p>`;
 
@@ -1775,6 +1779,17 @@ function renderManageRenewalsList() {
   manageRenewalsList.dataset.subscriptionId = subscription?.id || "";
 }
 
+async function refreshAfterRenewalMutation(successMessage) {
+  await loadSubscriptions({ source: "renewal-mutation" });
+  if (manageRenewalsDialog.open) {
+    renderManageRenewalsList();
+  }
+
+  if (successMessage) {
+    setSubscriptionStatus(successMessage);
+  }
+}
+
 async function deleteRenewalRecord(renewalId) {
   const { canManageUsers } = getCurrentPermissions();
   if (!canManageUsers) {
@@ -1793,9 +1808,7 @@ async function deleteRenewalRecord(renewalId) {
     return;
   }
 
-  setSubscriptionStatus("Renewal record deleted.");
-  await loadSubscriptions();
-  renderManageRenewalsList();
+  await refreshAfterRenewalMutation("Renewal record deleted.");
 }
 
 async function saveRenewal(event) {
@@ -1847,14 +1860,11 @@ async function saveRenewal(event) {
   }
 
   renewalDialog.close();
-  setSubscriptionStatus(renewalFormMode === "edit" ? "Renewal updated." : "Renewal saved.");
+  const successMessage = renewalFormMode === "edit" ? "Renewal updated." : "Renewal saved.";
   renewingSubscriptionId = null;
   editingRenewalId = null;
   renewalFormMode = "create";
-  await loadSubscriptions();
-  if (manageRenewalsDialog.open) {
-    renderManageRenewalsList();
-  }
+  await refreshAfterRenewalMutation(successMessage);
 }
 
 async function saveSubscription(event) {
