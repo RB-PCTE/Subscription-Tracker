@@ -364,9 +364,21 @@
         <fieldset class="form-group">
           <legend>Renewal term</legend>
 
+          <label>
+            Renewal outcome
+            <select id="renewal-outcome" name="renewal_outcome">
+              <option value="renewed">Renewed</option>
+              <option value="churned">Churned</option>
+              <option value="migrated">Migrated</option>
+            </select>
+          </label>
+
           <label id="renewal-effective-date-field">
             Effective date
             <input id="renewal-start-date" name="renewal_start_date" type="date" required />
+            <small id="renewal-effective-date-helper" class="helper-text">
+              For renewed, this starts a new term. For churned/migrated, this is when this subscription ends or is replaced.
+            </small>
           </label>
 
           <label id="renewal-billing-cycle-field">
@@ -381,15 +393,6 @@
           <label id="renewal-end-date-field">
             Renewal end date (calculated)
             <input id="renewal-end-date" name="renewal_end_date" type="date" readonly aria-readonly="true" />
-          </label>
-
-          <label>
-            Renewal outcome
-            <select id="renewal-outcome" name="renewal_outcome">
-              <option value="renewed">Renewed</option>
-              <option value="churned">Churned</option>
-              <option value="migrated">Migrated</option>
-            </select>
           </label>
 
           <label id="renewal-calculated-status-field">

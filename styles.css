@@ -591,6 +591,17 @@ dialog::backdrop {
   gap: 0.35rem;
 }
 
+#renewal-form label.is-disabled-field {
+  opacity: 0.65;
+}
+
+#renewal-form label.is-disabled-field input,
+#renewal-form label.is-disabled-field select {
+  background: #f1f5f9;
+  color: #64748b;
+  cursor: not-allowed;
+}
+
 .form-group {
   border: 1px solid var(--color-border);
   border-radius: var(--radius-md);
