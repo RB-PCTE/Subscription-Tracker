@@ -353,7 +353,7 @@
 
     <dialog id="renewal-dialog">
       <form id="renewal-form" method="dialog" novalidate>
-        <h3>Renew subscription</h3>
+        <h3 id="renewal-dialog-title">Renew subscription</h3>
         <p class="helper-text">
           Update the renewal outcome for <strong id="renewal-target-name">—</strong>.
         </p>
@@ -413,6 +413,17 @@
           <button id="cancel-renewal-btn" type="button" class="secondary">Cancel</button>
         </div>
       </form>
+    </dialog>
+
+    <dialog id="manage-renewals-dialog">
+      <article class="detail-layout">
+        <header class="detail-header">
+          <h3 id="manage-renewals-title">Manage renewals</h3>
+          <button id="close-manage-renewals-btn" type="button" class="secondary">Close</button>
+        </header>
+        <p class="helper-text">Admin-only workflow for correcting or deleting renewal records.</p>
+        <div id="manage-renewals-list" class="renewals-list"></div>
+      </article>
     </dialog>
 
     <dialog id="subscription-detail-dialog">
