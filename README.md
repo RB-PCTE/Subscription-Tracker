@@ -45,9 +45,9 @@ Create a second table named `public.subscription_renewals` to preserve renewal h
 - `id` (uuid, primary key)
 - `subscription_id` (uuid, references `public.subscriptions.id`)
 - `start_date` (date, required)
-- `end_date` (date, required)
+- `end_date` (date, optional for churned/migrated; required for renewed)
 - `billing_frequency` (text, optional)
-- `renewal_outcome` (text, default `pending`)
+- `renewal_outcome` (text, required: `renewed` | `churned` | `migrated`)
 - `status` (text, optional)
 - `notes` (text, optional)
 - `created_at` (timestamptz)
@@ -56,6 +56,7 @@ Create a second table named `public.subscription_renewals` to preserve renewal h
 The complete migration (table, FK, indexes, `updated_at` trigger, RLS, and policies) is included at:
 
 - `supabase/migrations/20260324_create_subscription_renewals.sql`
+- `supabase/migrations/20260325_align_subscription_renewals_schema.sql` (schema alignment + compatibility backfill)
 
 The UI treats `public.subscriptions` as parent/master records and `public.subscription_renewals` as child term events. Existing deployments without the renewals table still load subscription data; renewals are simply unavailable until the table is created.
 
