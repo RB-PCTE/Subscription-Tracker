@@ -235,15 +235,7 @@ function getEndDateValue(row = {}) {
 
 function normalizeRenewalOutcome(value) {
   const normalized = (value || "").toString().trim().toLowerCase();
-  if (!normalized) {
-    return "renewed";
-  }
-
-  if (["renewed", "churned", "migrated", "pending"].includes(normalized)) {
-    return normalized;
-  }
-
-  return "renewed";
+  return ["renewed", "churned", "migrated"].includes(normalized) ? normalized : "renewed";
 }
 
 function isRenewedOutcome(outcome) {
@@ -960,9 +952,9 @@ function buildRenewalsMap(rows = []) {
 
     const renewalRecord = {
       ...row,
-      renewal_start_date: row.renewal_start_date || row.start_date || null,
-      renewal_end_date: row.renewal_end_date || row.end_date || null,
-      billing_cycle: row.billing_cycle || row.billing_frequency || null,
+      renewal_start_date: row.start_date || row.renewal_start_date || null,
+      renewal_end_date: row.end_date || row.renewal_end_date || null,
+      billing_cycle: row.billing_frequency || row.billing_cycle || null,
       renewal_outcome: normalizeRenewalOutcome(row.renewal_outcome || row.outcome),
     };
 
@@ -981,41 +973,43 @@ function buildRenewalsMap(rows = []) {
 }
 
 async function loadRenewals() {
-  const normalizedErrorMessage = (message = "") => message.toLowerCase();
-  const isMissingTableError = (message = "") => {
-    const normalizedMessage = normalizedErrorMessage(message);
-    return normalizedMessage.includes("does not exist") || normalizedMessage.includes("relation");
-  };
-  const isMissingColumnError = (message = "") => normalizedErrorMessage(message).includes("column");
-
-  const currentSchemaResult = await supabase
+  const { data, error } = await supabase
     .from("subscription_renewals")
     .select("*")
     .order("start_date", { ascending: true, nullsFirst: false });
 
-  let data = currentSchemaResult.data;
-  let error = currentSchemaResult.error;
-
-  if (error && isMissingColumnError(error.message)) {
-    const legacySchemaResult = await supabase
-      .from("subscription_renewals")
-      .select("*")
-      .order("renewal_start_date", { ascending: true, nullsFirst: false });
-    data = legacySchemaResult.data;
-    error = legacySchemaResult.error;
-  }
-
   if (error) {
-    if (isMissingTableError(error.message) || isMissingColumnError(error.message)) {
-      console.warn("loadRenewals fallback: renewal table/columns unavailable", error.message);
-      renewalsBySubscription = new Map();
-      return;
-    }
-
     throw error;
   }
 
   renewalsBySubscription = buildRenewalsMap(data || []);
+}
+
+function buildRenewalPayload({ subscriptionId, startDate, billingFrequency, outcome, notes }) {
+  const shouldCreateNextTerm = isRenewedOutcome(outcome);
+  const endDate = shouldCreateNextTerm ? calculateSubscriptionEndDate({ start_date: startDate, billing_cycle: billingFrequency }) : null;
+
+  if (!startDate) {
+    return { error: "Provide an effective date." };
+  }
+
+  if (shouldCreateNextTerm && (!billingFrequency || !endDate)) {
+    return { error: "Provide effective date and billing frequency for a renewed subscription." };
+  }
+
+  return {
+    error: null,
+    endDate,
+    payload: {
+      subscription_id: subscriptionId,
+      start_date: startDate,
+      end_date: endDate,
+      billing_frequency: shouldCreateNextTerm ? billingFrequency : null,
+      renewal_outcome: outcome,
+      status: calculateSubscriptionStatus({ start_date: startDate, end_date: endDate, renewal_outcome: outcome }),
+      notes,
+    },
+  };
 }
 
 async function loadSubscriptions() {
@@ -1332,7 +1326,7 @@ function openSubscriptionDetail(row) {
     ["Status", toStatusLabel(calculateSubscriptionStatus(row))],
     ["Term start", formatDate(currentTerm?.renewal_start_date) || "—"],
     ["Term end", formatDate(currentTerm?.renewal_end_date) || "—"],
-    ["Outcome", toStatusLabel(currentTerm?.renewal_outcome || "pending")],
+    ["Outcome", toStatusLabel(currentTerm?.renewal_outcome || "renewed")],
   ]);
 
   detailRenewalHistory.innerHTML = "";
@@ -1342,7 +1336,7 @@ function openSubscriptionDetail(row) {
     history.forEach((term, index) => {
       const item = document.createElement("article");
       item.className = "renewal-item";
-      item.innerHTML = `<p><strong>Term ${index + 1}</strong> • ${toStatusLabel(term.renewal_outcome || "pending")}</p>
+      item.innerHTML = `<p><strong>Term ${index + 1}</strong> • ${toStatusLabel(term.renewal_outcome || "renewed")}</p>
       <p>${formatDate(term.renewal_start_date)} → ${formatDate(term.renewal_end_date)}</p>
       <p>${term.notes || "No notes"}</p>`;
       detailRenewalHistory.appendChild(item);
@@ -1415,19 +1409,19 @@ async function saveRenewal(event) {
   }
 
   const startDate = (renewalForm.elements.renewal_start_date.value || "").trim();
-  const billingCycle = (renewalForm.elements.billing_cycle.value || "").trim();
+  const billingFrequency = (renewalForm.elements.billing_cycle.value || "").trim();
   const outcome = normalizeRenewalOutcome(renewalForm.elements.renewal_outcome.value);
-  const shouldCreateNextTerm = isRenewedOutcome(outcome);
   const notes = (renewalForm.elements.notes.value || "").trim() || null;
-  const endDate = shouldCreateNextTerm ? calculateSubscriptionEndDate({ start_date: startDate, billing_cycle: billingCycle }) : null;
+  const { error: payloadError, payload } = buildRenewalPayload({
+    subscriptionId: renewingSubscriptionId,
+    startDate,
+    billingFrequency,
+    outcome,
+    notes,
+  });
 
-  if (!startDate) {
-    renewalFormError.textContent = "Provide an effective date.";
-    return;
-  }
-
-  if (shouldCreateNextTerm && (!billingCycle || !endDate)) {
-    renewalFormError.textContent = "Provide effective date and billing frequency for a renewed subscription.";
+  if (payloadError) {
+    renewalFormError.textContent = payloadError;
     return;
   }
 
@@ -1435,34 +1429,7 @@ async function saveRenewal(event) {
   saveRenewalButton.disabled = true;
   renewalFormError.textContent = "";
 
-  const renewalPayload = {
-    subscription_id: renewingSubscriptionId,
-    start_date: startDate,
-    renewal_outcome: outcome,
-    status: calculateSubscriptionStatus({ start_date: startDate, end_date: endDate, renewal_outcome: outcome }),
-    notes,
-  };
-  if (shouldCreateNextTerm) {
-    renewalPayload.end_date = endDate;
-    renewalPayload.billing_frequency = billingCycle;
-  }
-
-  let { error } = await supabase.from("subscription_renewals").insert(renewalPayload);
-
-  if (error && (error.message || "").toLowerCase().includes("column")) {
-    const legacyRenewalPayload = {
-      subscription_id: renewingSubscriptionId,
-      renewal_start_date: startDate,
-      renewal_outcome: outcome,
-      status: renewalPayload.status,
-      notes,
-    };
-    if (shouldCreateNextTerm) {
-      legacyRenewalPayload.renewal_end_date = endDate;
-      legacyRenewalPayload.billing_cycle = billingCycle;
-    }
-    ({ error } = await supabase.from("subscription_renewals").insert(legacyRenewalPayload));
-  }
+  const { error } = await supabase.from("subscription_renewals").insert(payload);
 
   isSubmittingRenewalForm = false;
   saveRenewalButton.disabled = false;
