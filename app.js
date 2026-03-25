@@ -86,11 +86,18 @@ let isSubmittingForm = false;
 let isSubmittingRenewalForm = false;
 let loadingSubscriptions = false;
 let activeView = "dashboard";
+let subscriptionsReloadTimer = null;
 
 const ROLE_PERMISSIONS = {
   admin: { canAdd: true, canEdit: true, canDelete: true, canManageUsers: true },
   member: { canAdd: true, canEdit: true, canDelete: false, canManageUsers: false },
   viewer: { canAdd: false, canEdit: false, canDelete: false, canManageUsers: false },
+};
+
+const SUBSCRIPTION_SORT_OPTIONS = {
+  "start-date-asc": { column: "start_date", ascending: true },
+  "start-date-desc": { column: "start_date", ascending: false },
+  "name-asc": { column: "plan", ascending: true },
 };
 
 function getCurrentPermissions() {
@@ -930,6 +937,65 @@ function refreshVisibleSubscriptions() {
   renderSubscriptions(filtered);
 }
 
+function scheduleSubscriptionsReload() {
+  if (subscriptionsReloadTimer) {
+    window.clearTimeout(subscriptionsReloadTimer);
+  }
+
+  subscriptionsReloadTimer = window.setTimeout(() => {
+    subscriptionsReloadTimer = null;
+    void loadSubscriptions({ source: "filters" });
+  }, 250);
+}
+
+function getSubscriptionsQueryInputs() {
+  return {
+    searchTerm: searchInput.value.trim(),
+    selectedStatus: statusFilter.value || "all",
+    selectedFrequency: frequencyFilter.value || "all",
+    selectedSort: sortControl.value || "start-date-asc",
+  };
+}
+
+function escapeSearchTermForPostgrest(searchTerm = "") {
+  return searchTerm
+    .replace(/[%]/g, "\\%")
+    .replace(/[,]/g, " ")
+    .replace(/[()]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function applySubscriptionsQueryFilters(baseQuery, queryInputs, { applySort = true } = {}) {
+  let query = baseQuery;
+  const { searchTerm, selectedFrequency, selectedSort } = queryInputs;
+
+  if (searchTerm) {
+    const escapedSearch = escapeSearchTermForPostgrest(searchTerm);
+    if (escapedSearch) {
+      const ilikeValue = `%${escapedSearch}%`;
+      const searchFilter = [
+        `plan.ilike.${ilikeValue}`,
+        `customer_company_name.ilike.${ilikeValue}`,
+        `equipment_name.ilike.${ilikeValue}`,
+        `serial_number.ilike.${ilikeValue}`,
+      ].join(",");
+      query = query.or(searchFilter);
+    }
+  }
+
+  if (selectedFrequency !== "all") {
+    query = query.eq("billing_cycle", selectedFrequency);
+  }
+
+  if (applySort) {
+    const sortConfig = SUBSCRIPTION_SORT_OPTIONS[selectedSort] || SUBSCRIPTION_SORT_OPTIONS["start-date-asc"];
+    query = query.order(sortConfig.column, { ascending: sortConfig.ascending });
+  }
+
+  return query;
+}
+
 function setBusyState(isBusy) {
   loadingSubscriptions = isBusy;
   subscriptionsSection.classList.toggle("is-loading", isBusy);
@@ -1129,26 +1195,30 @@ function buildRenewalPayload({ subscriptionId, startDate, billingFrequency, outc
   };
 }
 
-async function loadSubscriptions() {
+async function loadSubscriptions({ source = "default" } = {}) {
   if (!currentUser || !currentUserRole) {
     clearSubscriptions();
     return;
   }
 
+  const queryInputs = getSubscriptionsQueryInputs();
   setBusyState(true);
   setSubscriptionStatus("Loading subscriptions...");
-  console.debug("loadSubscriptions start");
+  console.debug("loadSubscriptions start", { source, ...queryInputs });
 
-  const queryResult = await supabase
-    .from("subscriptions")
-    .select("*")
-    .order("start_date", { ascending: true, nullsFirst: false });
+  const baseQuery = supabase.from("subscriptions").select("*");
+  const queryResult = await applySubscriptionsQueryFilters(baseQuery, queryInputs);
 
   let data = null;
   let error = null;
 
   if (queryResult.error && queryResult.error.message?.toLowerCase().includes("column")) {
-    const legacyResult = await supabase.from("subscriptions").select("*").order("renewal_date", { ascending: true, nullsFirst: false });
+    const legacyBaseQuery = supabase.from("subscriptions").select("*");
+    const legacySortQuery = applySubscriptionsQueryFilters(legacyBaseQuery, {
+      ...queryInputs,
+      selectedSort: queryInputs.selectedSort === "start-date-desc" ? "start-date-desc" : "start-date-asc",
+    }, { applySort: false }).order("renewal_date", { ascending: queryInputs.selectedSort !== "start-date-desc" });
+    const legacyResult = await legacySortQuery;
     data = legacyResult.data;
     error = legacyResult.error;
   } else {
@@ -1160,7 +1230,7 @@ async function loadSubscriptions() {
 
   if (error) {
     setSubscriptionStatus(`Unable to load subscriptions: ${error.message}`, true);
-    console.error("loadSubscriptions error", error);
+    console.error("loadSubscriptions error", { error, source, queryInputs });
     return;
   }
 
@@ -2196,10 +2266,14 @@ function handleNavClick(event) {
   setActiveView(button.dataset.navTarget);
 }
 
-searchInput.addEventListener("input", refreshVisibleSubscriptions);
+searchInput.addEventListener("input", scheduleSubscriptionsReload);
 statusFilter.addEventListener("change", refreshVisibleSubscriptions);
-frequencyFilter.addEventListener("change", refreshVisibleSubscriptions);
-sortControl.addEventListener("change", refreshVisibleSubscriptions);
+frequencyFilter.addEventListener("change", () => {
+  void loadSubscriptions({ source: "frequency-filter" });
+});
+sortControl.addEventListener("change", () => {
+  void loadSubscriptions({ source: "sort-control" });
+});
 addSubscriptionButton.addEventListener("click", openAddForm);
 emptyAddButton.addEventListener("click", openAddForm);
 newSubscriptionCta.addEventListener("click", () => {
