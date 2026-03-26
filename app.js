@@ -884,15 +884,6 @@ function renderSubscriptions(rows) {
     actions.appendChild(viewButton);
 
     if (canEdit) {
-      const editButton = document.createElement("button");
-      editButton.type = "button";
-      editButton.className = "secondary table-action";
-      editButton.dataset.action = "edit";
-      editButton.dataset.id = row.id;
-      editButton.textContent = "Edit";
-      editButton.title = "Edit subscription details";
-      actions.appendChild(editButton);
-
       const renewButton = document.createElement("button");
       renewButton.type = "button";
       renewButton.className = "secondary table-action";
@@ -904,23 +895,50 @@ function renderSubscriptions(rows) {
     }
 
     if (canManageUsers) {
+      const menu = document.createElement("details");
+      menu.className = "action-menu";
+
+      const menuTrigger = document.createElement("summary");
+      menuTrigger.className = "secondary table-action action-menu-trigger";
+      menuTrigger.setAttribute("aria-label", `More actions for ${formatSubscriptionName(row)}`);
+      menuTrigger.textContent = "⋯";
+      menu.appendChild(menuTrigger);
+
+      const menuItems = document.createElement("div");
+      menuItems.className = "action-menu-list";
+      menuItems.setAttribute("role", "menu");
+
+      const editButton = document.createElement("button");
+      editButton.type = "button";
+      editButton.className = "action-menu-item";
+      editButton.dataset.action = "edit";
+      editButton.dataset.id = row.id;
+      editButton.setAttribute("role", "menuitem");
+      editButton.textContent = "Edit";
+      menuItems.appendChild(editButton);
+
       const manageRenewalsButton = document.createElement("button");
       manageRenewalsButton.type = "button";
-      manageRenewalsButton.className = "secondary table-action";
+      manageRenewalsButton.className = "action-menu-item";
       manageRenewalsButton.dataset.action = "manage-renewals";
       manageRenewalsButton.dataset.id = row.id;
+      manageRenewalsButton.setAttribute("role", "menuitem");
       manageRenewalsButton.textContent = "Manage renewals";
-      actions.appendChild(manageRenewalsButton);
-    }
+      menuItems.appendChild(manageRenewalsButton);
 
-    if (canDelete) {
-      const deleteButton = document.createElement("button");
-      deleteButton.type = "button";
-      deleteButton.className = "secondary table-action danger-action";
-      deleteButton.dataset.action = "delete";
-      deleteButton.dataset.id = row.id;
-      deleteButton.textContent = "Delete";
-      actions.appendChild(deleteButton);
+      if (canDelete) {
+        const deleteButton = document.createElement("button");
+        deleteButton.type = "button";
+        deleteButton.className = "action-menu-item danger-action-text";
+        deleteButton.dataset.action = "delete";
+        deleteButton.dataset.id = row.id;
+        deleteButton.setAttribute("role", "menuitem");
+        deleteButton.textContent = "Delete";
+        menuItems.appendChild(deleteButton);
+      }
+
+      menu.appendChild(menuItems);
+      actions.appendChild(menu);
     }
 
     actionsTd.appendChild(actions);
@@ -2090,6 +2108,33 @@ function handleTableClick(event) {
   if (action === "delete") {
     void deleteSubscription(id);
   }
+
+  closeActionMenus();
+}
+
+function closeActionMenus() {
+  subscriptionsBody.querySelectorAll(".action-menu[open]").forEach((menu) => {
+    menu.removeAttribute("open");
+  });
+}
+
+function handleActionMenuToggle(event) {
+  const menu = event.target.closest(".action-menu");
+  if (!menu || !menu.open) {
+    return;
+  }
+
+  subscriptionsBody.querySelectorAll(".action-menu[open]").forEach((openMenu) => {
+    if (openMenu !== menu) {
+      openMenu.removeAttribute("open");
+    }
+  });
+}
+
+function handleDocumentClick(event) {
+  if (!event.target.closest(".action-menu")) {
+    closeActionMenus();
+  }
 }
 
 function handleManageRenewalsClick(event) {
@@ -2483,6 +2528,13 @@ newSubscriptionCta.addEventListener("click", () => {
 });
 document.querySelector(".sidebar-nav").addEventListener("click", handleNavClick);
 subscriptionsBody.addEventListener("click", handleTableClick);
+subscriptionsBody.addEventListener("toggle", handleActionMenuToggle, true);
+document.addEventListener("click", handleDocumentClick);
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape") {
+    closeActionMenus();
+  }
+});
 subscriptionForm.addEventListener("submit", saveSubscription);
 ["customer_company_name", "equipment_name", "serial_number"].forEach((fieldName) => {
   subscriptionForm.elements[fieldName]?.addEventListener("input", updateGeneratedNamePreview);
