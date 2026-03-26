@@ -595,6 +595,29 @@ td {
 
 .renewals-list {
   display: grid;
+  gap: var(--space-4);
+}
+
+.renewal-workbench-group {
+  display: grid;
+  gap: var(--space-3);
+}
+
+.renewal-workbench-group-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  border-bottom: 1px solid var(--color-border);
+  padding-bottom: var(--space-2);
+}
+
+.renewal-workbench-group-header h3,
+.renewal-workbench-group-header p {
+  margin: 0;
+}
+
+.renewal-group-list {
+  display: grid;
   gap: var(--space-3);
 }
 
@@ -607,6 +630,37 @@ td {
 
 .renewal-item p {
   margin: 0;
+}
+
+.workbench-item {
+  display: grid;
+  gap: var(--space-3);
+  grid-template-columns: minmax(280px, 2fr) minmax(220px, 1fr);
+}
+
+.workbench-item-main {
+  display: grid;
+  gap: var(--space-2);
+}
+
+.workbench-item-actions {
+  display: grid;
+  gap: var(--space-2);
+}
+
+.workbench-item-actions label {
+  display: grid;
+  gap: 0.35rem;
+}
+
+.workbench-item-actions button {
+  justify-self: start;
+}
+
+@media (max-width: 900px) {
+  .workbench-item {
+    grid-template-columns: 1fr;
+  }
 }
 
 .is-view-hidden {

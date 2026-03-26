@@ -39,6 +39,10 @@ Create a table named `public.subscriptions` with these columns:
 - `created_by` (uuid, optional)
 - `created_at` (timestamptz)
 - `updated_at` (timestamptz)
+- `quote_progress` (text, default `not started`)
+- `invoice_progress` (text, default `not started`)
+- `final_warning_progress` (text, default `not started`)
+- `renewal_workflow_note` (text, optional short Ops note)
 
 Create a second table named `public.subscription_renewals` to preserve renewal history separately from the base subscription:
 
@@ -57,6 +61,7 @@ The complete migration (table, FK, indexes, `updated_at` trigger, RLS, and polic
 
 - `supabase/migrations/20260324_create_subscription_renewals.sql`
 - `supabase/migrations/20260325_align_subscription_renewals_schema.sql` (schema alignment + compatibility backfill)
+- `supabase/migrations/20260326_add_subscription_workbench_workflow_fields.sql` (manual workflow tracking fields for the Renewal Workbench)
 
 The UI treats `public.subscriptions` as parent/master records and `public.subscription_renewals` as child term events. Existing deployments without the renewals table still load subscription data; renewals are simply unavailable until the table is created.
 
