@@ -413,15 +413,74 @@ td {
 .actions {
   display: flex;
   gap: var(--space-2);
+  align-items: center;
+  justify-content: flex-start;
 }
 
 .action-row {
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
 }
 
 .table-action {
   padding: 0.38rem 0.55rem;
   font-size: 0.8rem;
+}
+
+.action-menu {
+  position: relative;
+}
+
+.action-menu-trigger {
+  min-width: 2rem;
+  text-align: center;
+  padding-inline: 0.45rem;
+  list-style: none;
+}
+
+.action-menu-trigger::-webkit-details-marker {
+  display: none;
+}
+
+.action-menu[open] .action-menu-trigger {
+  background: #eef2ff;
+  border-color: #c7d2fe;
+}
+
+.action-menu-list {
+  position: absolute;
+  top: calc(100% + 0.3rem);
+  right: 0;
+  z-index: 10;
+  min-width: 11rem;
+  background: var(--color-bg-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-md);
+  padding: 0.3rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+}
+
+.action-menu-item {
+  width: 100%;
+  text-align: left;
+  border: 0;
+  background: transparent;
+  border-radius: var(--radius-sm);
+  font-size: 0.82rem;
+  padding: 0.42rem 0.52rem;
+  color: var(--color-text-primary);
+}
+
+.action-menu-item:hover,
+.action-menu-item:focus-visible {
+  background: var(--color-bg-muted);
+  outline: none;
+}
+
+.danger-action-text {
+  color: var(--color-danger);
 }
 
 .danger-action {
