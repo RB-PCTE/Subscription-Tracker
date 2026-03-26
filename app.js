@@ -124,6 +124,19 @@ const SUBSCRIPTION_SEARCH_COLUMN_CANDIDATES = [
   "name",
 ];
 
+const WORKBENCH_GROUPS = [
+  { key: "needs-attention", label: "Needs Attention", statuses: ["attn required", "final warning"] },
+  { key: "quote", label: "Quote", statuses: ["quote"] },
+  { key: "invoice", label: "Invoice", statuses: ["invoice"] },
+  { key: "active", label: "Active", statuses: ["active"] },
+];
+
+const WORKFLOW_PROGRESS_OPTIONS = {
+  quote: ["not started", "drafting", "sent", "follow up needed", "accepted", "declined"],
+  invoice: ["not started", "prepared", "sent", "awaiting payment", "paid"],
+  "final warning": ["not started", "sent", "follow up needed", "escalated", "closed"],
+};
+
 function getCurrentPermissions() {
   return ROLE_PERMISSIONS[currentUserRole] || { canAdd: false, canEdit: false, canDelete: false };
 }
@@ -456,6 +469,16 @@ function toStatusLabel(value) {
     .join(" ");
 }
 
+function escapeHtml(value) {
+  return (value || "")
+    .toString()
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#39;");
+}
+
 function parseDateStartOfDay(dateInput) {
   if (!dateInput) {
     return null;
@@ -738,6 +761,92 @@ function safeGetEndDateValue(row) {
   }
 }
 
+function getCustomerDisplayName(row = {}) {
+  const metadata = getSubscriptionMetadata(row);
+  return row.customer_company_name || metadata.customerCompanyName || "—";
+}
+
+function getDaysUntilEndDate(row = {}) {
+  const endDate = parseDateStartOfDay(safeGetEndDateValue(row));
+  if (!endDate) {
+    return null;
+  }
+
+  const today = parseDateStartOfDay(new Date());
+  return Math.floor((endDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
+}
+
+function formatRemainingDays(daysUntilEndDate) {
+  if (!Number.isFinite(daysUntilEndDate)) {
+    return "No end date";
+  }
+
+  if (daysUntilEndDate < 0) {
+    const overdueDays = Math.abs(daysUntilEndDate);
+    return overdueDays === 1 ? "Overdue by 1 day" : `Overdue by ${overdueDays} days`;
+  }
+
+  if (daysUntilEndDate === 0) {
+    return "Due today";
+  }
+
+  return daysUntilEndDate === 1 ? "1 day remaining" : `${daysUntilEndDate} days remaining`;
+}
+
+function getWorkflowFieldConfigByStatus(statusValue) {
+  if (!statusValue || !WORKFLOW_PROGRESS_OPTIONS[statusValue]) {
+    return null;
+  }
+
+  const byStatus = {
+    quote: { column: "quote_progress", label: "Quote progress" },
+    invoice: { column: "invoice_progress", label: "Invoice progress" },
+    "final warning": { column: "final_warning_progress", label: "Final warning progress" },
+  };
+
+  return byStatus[statusValue] || null;
+}
+
+function getWorkflowValue(row = {}, statusValue = "") {
+  const config = getWorkflowFieldConfigByStatus(statusValue);
+  if (!config) {
+    return null;
+  }
+
+  const storedValue = (row?.[config.column] || "").toString().trim().toLowerCase();
+  const options = WORKFLOW_PROGRESS_OPTIONS[statusValue];
+  if (options.includes(storedValue)) {
+    return storedValue;
+  }
+
+  return "not started";
+}
+
+function sortWorkbenchRowsByUrgency(rows = []) {
+  return [...rows].sort((a, b) => {
+    const daysA = getDaysUntilEndDate(a);
+    const daysB = getDaysUntilEndDate(b);
+
+    if (daysA == null && daysB == null) {
+      return formatSubscriptionName(a).localeCompare(formatSubscriptionName(b));
+    }
+
+    if (daysA == null) {
+      return 1;
+    }
+
+    if (daysB == null) {
+      return -1;
+    }
+
+    if (daysA !== daysB) {
+      return daysA - daysB;
+    }
+
+    return formatSubscriptionName(a).localeCompare(formatSubscriptionName(b));
+  });
+}
+
 function populateFilterOptions() {
   const statuses = [...new Set(subscriptions.map((row) => safeCalculateSubscriptionStatus(row)).filter(Boolean))].sort();
   const frequencies = [...new Set(subscriptions.map((row) => (row.billing_cycle || "unspecified").toLowerCase()).filter(Boolean))].sort();
@@ -960,31 +1069,149 @@ function updateDashboardMetrics() {
 
 function renderRenewalsPanel() {
   if (!subscriptions.length) {
-    renewalsList.innerHTML = '<div class="renewal-item"><p>No end date data yet. Add subscriptions to populate this view.</p></div>';
-    return;
-  }
-
-  const upcomingRows = subscriptions
-    .filter((row) => getCurrentTermEndDateValue(row))
-    .sort((a, b) => new Date(getCurrentTermEndDateValue(a)).getTime() - new Date(getCurrentTermEndDateValue(b)).getTime())
-    .slice(0, 6);
-
-  if (!upcomingRows.length) {
-    renewalsList.innerHTML = '<div class="renewal-item"><p>No end dates found.</p></div>';
+    renewalsList.innerHTML = '<div class="renewal-item"><p>No subscriptions yet. Add subscriptions to populate this workbench.</p></div>';
     return;
   }
 
   renewalsList.innerHTML = "";
+  const { canEdit } = getCurrentPermissions();
 
-  upcomingRows.forEach((row) => {
-    const endDate = getCurrentTermEndDateValue(row);
-    const item = document.createElement("article");
-    item.className = "renewal-item";
-    item.innerHTML = `<p><strong>${formatSubscriptionName(row)}</strong> • ${row.plan || "No plan"}</p><p>${formatDate(
-      endDate
-    )} • ${toStatusLabel(safeCalculateSubscriptionStatus(row))}</p>`;
-    renewalsList.appendChild(item);
+  WORKBENCH_GROUPS.forEach((group) => {
+    const rowsInGroup = sortWorkbenchRowsByUrgency(
+      subscriptions.filter((row) => group.statuses.includes(safeCalculateSubscriptionStatus(row)))
+    );
+
+    const section = document.createElement("section");
+    section.className = "renewal-workbench-group";
+    section.innerHTML = `<header class="renewal-workbench-group-header">
+      <h3>${group.label}</h3>
+      <p>${rowsInGroup.length} subscription${rowsInGroup.length === 1 ? "" : "s"}</p>
+    </header>`;
+
+    if (!rowsInGroup.length) {
+      const empty = document.createElement("article");
+      empty.className = "renewal-item";
+      empty.innerHTML = "<p>No subscriptions in this queue.</p>";
+      section.appendChild(empty);
+      renewalsList.appendChild(section);
+      return;
+    }
+
+    const groupList = document.createElement("div");
+    groupList.className = "renewal-group-list";
+
+    rowsInGroup.forEach((row) => {
+      const statusValue = safeCalculateSubscriptionStatus(row);
+      const workflowConfig = getWorkflowFieldConfigByStatus(statusValue);
+      const selectedWorkflowValue = getWorkflowValue(row, statusValue);
+      const noteValue = (row.renewal_workflow_note || "").toString();
+      const endDate = safeGetEndDateValue(row);
+      const daysUntilEndDate = getDaysUntilEndDate(row);
+      const card = document.createElement("article");
+      card.className = "renewal-item workbench-item";
+      card.dataset.subscriptionId = row.id;
+      card.innerHTML = `
+        <div class="workbench-item-main">
+          <p><strong>${escapeHtml(formatSubscriptionName(row))}</strong></p>
+          <p>Customer: ${escapeHtml(getCustomerDisplayName(row))}</p>
+          <p>End date: ${formatDate(endDate) || "—"}</p>
+          <p class="${daysUntilEndDate != null && daysUntilEndDate < 0 ? "renewal-urgent" : "renewal-normal"}">${formatRemainingDays(
+            daysUntilEndDate
+          )}</p>
+          <span class="status-pill status-${statusValue.replace(/\s+/g, "-")}">${toStatusLabel(statusValue)}</span>
+        </div>
+        <div class="workbench-item-actions">
+          ${
+            workflowConfig
+              ? `<label>
+                  ${workflowConfig.label}
+                  <select data-workflow-select="true" data-workflow-column="${workflowConfig.column}" ${
+                    canEdit ? "" : "disabled"
+                  }>
+                    ${WORKFLOW_PROGRESS_OPTIONS[statusValue]
+                      .map(
+                        (option) =>
+                          `<option value="${option}" ${selectedWorkflowValue === option ? "selected" : ""}>${toStatusLabel(option)}</option>`
+                      )
+                      .join("")}
+                  </select>
+                </label>`
+              : '<p class="helper-text">No workflow update needed for this status.</p>'
+          }
+          <label>
+            Last action note
+            <input
+              type="text"
+              maxlength="200"
+              placeholder="Optional note"
+              value="${escapeHtml(noteValue)}"
+              data-workflow-note="true"
+              ${canEdit ? "" : "disabled"}
+            />
+          </label>
+          <button type="button" class="secondary" data-action="save-workflow" ${canEdit ? "" : "disabled"}>Save update</button>
+        </div>
+      `;
+      groupList.appendChild(card);
+    });
+
+    section.appendChild(groupList);
+    renewalsList.appendChild(section);
   });
+}
+
+async function updateRenewalWorkflow(subscriptionId, payload) {
+  if (!subscriptionId || !payload || typeof payload !== "object") {
+    return;
+  }
+
+  const { canEdit } = getCurrentPermissions();
+  if (!canEdit) {
+    setSubscriptionStatus("Your role is not allowed to update workflow progress.", true);
+    return;
+  }
+
+  const { data, error } = await updateSubscription(subscriptionId, payload);
+  if (error) {
+    setSubscriptionStatus(`Unable to save workflow update: ${error.message}`, true);
+    return;
+  }
+
+  if (data) {
+    replaceSubscriptionInState(data);
+    refreshSubscriptionViews();
+  } else {
+    await loadSubscriptions({ source: "workflow-update" });
+  }
+
+  setSubscriptionStatus("Renewal workflow updated.");
+}
+
+function handleRenewalsWorkbenchClick(event) {
+  const button = event.target.closest("button[data-action='save-workflow']");
+  if (!button) {
+    return;
+  }
+
+  const card = button.closest("[data-subscription-id]");
+  const subscriptionId = card?.dataset.subscriptionId;
+  if (!subscriptionId) {
+    return;
+  }
+
+  const payload = {};
+  const workflowSelect = card.querySelector("select[data-workflow-select='true']");
+  const workflowColumn = workflowSelect?.dataset.workflowColumn;
+  if (workflowColumn && workflowSelect?.value) {
+    payload[workflowColumn] = workflowSelect.value;
+  }
+
+  const noteInput = card.querySelector("input[data-workflow-note='true']");
+  if (noteInput) {
+    payload.renewal_workflow_note = (noteInput.value || "").trim() || null;
+  }
+
+  void updateRenewalWorkflow(subscriptionId, payload);
 }
 
 function refreshVisibleSubscriptions() {
@@ -2564,6 +2791,7 @@ manageRenewalsList.addEventListener("click", handleManageRenewalsClick);
 closeDetailButton.addEventListener("click", () => detailDialog.close());
 inviteForm.addEventListener("submit", grantAccess);
 invitesBody.addEventListener("click", handleInvitesClick);
+renewalsList.addEventListener("click", handleRenewalsWorkbenchClick);
 sendMagicLinkButton.addEventListener("click", sendMagicLink);
 signInPasswordButton.addEventListener("click", signInWithPassword);
 signUpPasswordButton.addEventListener("click", signUpWithPassword);
