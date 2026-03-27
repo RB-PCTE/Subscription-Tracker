@@ -99,7 +99,7 @@ let editingRenewalId = null;
 let managingSubscriptionId = null;
 let loadingSubscriptions = false;
 let activeView = "dashboard";
-let subscriptionsReloadTimer = null;
+let searchRefreshTimer = null;
 let subscriptionsColumnInventory = new Set();
 
 const ROLE_PERMISSIONS = {
@@ -117,16 +117,19 @@ const SUBSCRIPTION_SORT_OPTIONS = {
   "name-asc": { column: "plan", ascending: true },
 };
 
-const SUBSCRIPTION_SEARCH_COLUMN_CANDIDATES = [
-  "plan",
-  "customer_company_name",
-  "customer_company",
-  "equipment_name",
-  "device_name",
-  "product_name",
-  "serial_number",
-  "subscription_name",
-  "name",
+const SUBSCRIPTION_SEARCH_FIELD_CANDIDATES = [
+  { filterKey: "plan", requiresColumn: "plan" },
+  { filterKey: "customer_company_name", requiresColumn: "customer_company_name" },
+  { filterKey: "customer_company", requiresColumn: "customer_company" },
+  { filterKey: "equipment_name", requiresColumn: "equipment_name" },
+  { filterKey: "device_name", requiresColumn: "device_name" },
+  { filterKey: "product_name", requiresColumn: "product_name" },
+  { filterKey: "serial_number", requiresColumn: "serial_number" },
+  { filterKey: "subscription_name", requiresColumn: "subscription_name" },
+  { filterKey: "name", requiresColumn: "name" },
+  { filterKey: "subscription_metadata->>customerCompanyName", requiresColumn: "subscription_metadata" },
+  { filterKey: "subscription_metadata->>equipmentName", requiresColumn: "subscription_metadata" },
+  { filterKey: "subscription_metadata->>serialNumber", requiresColumn: "subscription_metadata" },
 ];
 
 const WORKBENCH_GROUPS = [
@@ -1421,15 +1424,15 @@ function refreshVisibleSubscriptions() {
   renderSubscriptions(filtered);
 }
 
-function scheduleSubscriptionsReload() {
-  if (subscriptionsReloadTimer) {
-    window.clearTimeout(subscriptionsReloadTimer);
+function scheduleSearchRefresh() {
+  if (searchRefreshTimer) {
+    window.clearTimeout(searchRefreshTimer);
   }
 
-  subscriptionsReloadTimer = window.setTimeout(() => {
-    subscriptionsReloadTimer = null;
-    void loadSubscriptions({ source: "filters" });
-  }, 250);
+  searchRefreshTimer = window.setTimeout(() => {
+    searchRefreshTimer = null;
+    refreshVisibleSubscriptions();
+  }, 300);
 }
 
 function getSubscriptionsQueryInputs() {
@@ -1451,6 +1454,10 @@ function escapeSearchTermForPostgrest(searchTerm = "") {
 }
 
 function syncSubscriptionsColumnInventory(rows = []) {
+  if (!Array.isArray(rows) || rows.length === 0) {
+    return;
+  }
+
   const nextColumns = new Set();
   rows.forEach((row) => {
     if (!row || typeof row !== "object") {
@@ -1469,8 +1476,8 @@ function syncSubscriptionsColumnInventory(rows = []) {
 }
 
 function getSearchableSubscriptionColumns() {
-  return SUBSCRIPTION_SEARCH_COLUMN_CANDIDATES.filter((columnName) =>
-    subscriptionsColumnInventory.has(columnName)
+  return SUBSCRIPTION_SEARCH_FIELD_CANDIDATES.filter(({ requiresColumn }) =>
+    subscriptionsColumnInventory.has(requiresColumn)
   );
 }
 
@@ -1486,7 +1493,7 @@ function applySubscriptionsQueryFilters(baseQuery, queryInputs, { applySort = tr
       console.debug("server-side search columns", { searchableColumns, searchTerm: escapedSearch });
       if (searchableColumns.length > 0) {
         const searchFilter = searchableColumns
-          .map((columnName) => `${columnName}.ilike.${ilikeValue}`)
+          .map(({ filterKey }) => `${filterKey}.ilike.${ilikeValue}`)
           .join(",");
         query = query.or(searchFilter);
       }
@@ -1510,7 +1517,6 @@ function setBusyState(isBusy) {
   subscriptionsSection.classList.toggle("is-loading", isBusy);
   addSubscriptionButton.disabled = isBusy;
   emptyAddButton.disabled = isBusy;
-  searchInput.disabled = isBusy;
   statusFilter.disabled = isBusy;
   frequencyFilter.disabled = isBusy;
   sortControl.disabled = isBusy;
@@ -2941,7 +2947,7 @@ function handleNavClick(event) {
   setActiveView(button.dataset.navTarget);
 }
 
-searchInput.addEventListener("input", scheduleSubscriptionsReload);
+searchInput.addEventListener("input", scheduleSearchRefresh);
 statusFilter.addEventListener("change", refreshVisibleSubscriptions);
 frequencyFilter.addEventListener("change", () => {
   void loadSubscriptions({ source: "frequency-filter" });
