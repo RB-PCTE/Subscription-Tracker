@@ -3328,6 +3328,7 @@ function normalizeImportDate(value) {
 
 function renderImportSummary(summary = {}) {
   importPreview.innerHTML = `<h4>Preview summary</h4>
+    <p>Validated files: <strong>${escapeHtml(summary.filesValidated || "None")}</strong></p>
     <ul>
       <li>Subscriptions to create: <strong>${summary.subscriptionsToCreate || 0}</strong></li>
       <li>Renewals to create: <strong>${summary.renewalsToCreate || 0}</strong></li>
@@ -3373,6 +3374,43 @@ function getRequiredMissingFields(record, fields) {
   return fields.filter((fieldName) => !(record[fieldName] || "").toString().trim());
 }
 
+async function loadAllSubscriptionsForImport() {
+  let query = supabase.from("subscriptions").select("id, serial_number, subscription_metadata, notes");
+  let { data, error } = await query;
+
+  if (error && /serial_number/i.test(error.message || "")) {
+    ({ data, error } = await supabase.from("subscriptions").select("id, subscription_metadata, notes"));
+  }
+
+  if (error) {
+    throw error;
+  }
+
+  return (data || []).filter((row) => row?.id);
+}
+
+function mapExistingSubscriptionsBySerial(rows = [], serialsFilter = []) {
+  const wantedSerials = new Set((serialsFilter || []).map((value) => (value || "").toString().trim()).filter(Boolean));
+  const bySerial = new Map();
+
+  rows.forEach((row) => {
+    const metadata = getSubscriptionMetadata(row);
+    const serial = (metadata.serialNumber || row.serial_number || "").toString().trim();
+    if (!serial) {
+      return;
+    }
+    if (wantedSerials.size > 0 && !wantedSerials.has(serial)) {
+      return;
+    }
+    if (!bySerial.has(serial)) {
+      bySerial.set(serial, []);
+    }
+    bySerial.get(serial).push(row);
+  });
+
+  return bySerial;
+}
+
 async function validateImportFiles() {
   const { canManageUsers } = getCurrentPermissions();
   if (!canManageUsers) {
@@ -3383,8 +3421,8 @@ async function validateImportFiles() {
   const subscriptionsFile = subscriptionsImportFileInput?.files?.[0];
   const renewalsFile = renewalsImportFileInput?.files?.[0];
 
-  if (!subscriptionsFile || !renewalsFile) {
-    setImportStatus("Upload both subscriptions.csv and renewals.csv before validating.", true);
+  if (!subscriptionsFile && !renewalsFile) {
+    setImportStatus("Upload at least one CSV file before validating.", true);
     return;
   }
 
@@ -3392,22 +3430,25 @@ async function validateImportFiles() {
   setImportStatus("Validating CSV files...");
 
   const errors = [];
-  let subscriptionsCsv;
-  let renewalsCsv;
+  let subscriptionsCsv = "";
+  let renewalsCsv = "";
   try {
-    [subscriptionsCsv, renewalsCsv] = await Promise.all([readFileAsText(subscriptionsFile), readFileAsText(renewalsFile)]);
+    [subscriptionsCsv, renewalsCsv] = await Promise.all([
+      subscriptionsFile ? readFileAsText(subscriptionsFile) : Promise.resolve(""),
+      renewalsFile ? readFileAsText(renewalsFile) : Promise.resolve(""),
+    ]);
   } catch (error) {
     setImportStatus(error.message, true);
     return;
   }
 
-  const parsedSubscriptions = parseCsv(subscriptionsCsv);
-  const parsedRenewals = parseCsv(renewalsCsv);
+  const parsedSubscriptions = subscriptionsFile ? parseCsv(subscriptionsCsv) : { headers: [], rows: [] };
+  const parsedRenewals = renewalsFile ? parseCsv(renewalsCsv) : { headers: [], rows: [] };
 
-  if (!parsedSubscriptions.headers.includes("serial_number")) {
+  if (subscriptionsFile && !parsedSubscriptions.headers.includes("serial_number")) {
     errors.push({ file: "subscriptions.csv", row: "header", message: "Missing required serial_number column." });
   }
-  if (!parsedRenewals.headers.includes("serial_number")) {
+  if (renewalsFile && !parsedRenewals.headers.includes("serial_number")) {
     errors.push({ file: "renewals.csv", row: "header", message: "Missing required serial_number column." });
   }
 
@@ -3498,26 +3539,14 @@ async function validateImportFiles() {
 
   const serialsFromFiles = [...new Set([...normalizedSubscriptionRows.map((row) => row.serial_number), ...renewalRows.map((row) => row.serial_number)])];
   let existingSubscriptions = [];
-  if (serialsFromFiles.length) {
-    const { data, error } = await supabase.from("subscriptions").select("id, serial_number").in("serial_number", serialsFromFiles);
-    if (error) {
-      setImportStatus(`Unable to validate existing subscriptions: ${error.message}`, true);
-      return;
-    }
-    existingSubscriptions = data || [];
+  let existingBySerial = new Map();
+  try {
+    existingSubscriptions = await loadAllSubscriptionsForImport();
+    existingBySerial = mapExistingSubscriptionsBySerial(existingSubscriptions, serialsFromFiles);
+  } catch (error) {
+    setImportStatus(`Unable to validate existing subscriptions: ${error.message}`, true);
+    return;
   }
-
-  const existingBySerial = new Map();
-  existingSubscriptions.forEach((row) => {
-    const serial = (row.serial_number || "").trim();
-    if (!serial) {
-      return;
-    }
-    if (!existingBySerial.has(serial)) {
-      existingBySerial.set(serial, []);
-    }
-    existingBySerial.get(serial).push(row);
-  });
 
   const existingRenewalsBySubscription = new Map();
   const existingSubscriptionIds = existingSubscriptions.map((row) => row.id);
@@ -3588,6 +3617,9 @@ async function validateImportFiles() {
 
   const invalidRows = errors.length;
   const summary = {
+    filesValidated: `${subscriptionsFile ? "subscriptions.csv" : ""}${subscriptionsFile && renewalsFile ? " + " : ""}${
+      renewalsFile ? "renewals.csv" : ""
+    }`,
     subscriptionsToCreate: Math.max(0, normalizedSubscriptionRows.length - existingSubscriptionConflicts),
     renewalsToCreate: Math.max(0, renewalRows.length - unmatchedRenewals - existingRenewalConflicts),
     unmatchedRenewals,
@@ -3611,12 +3643,12 @@ async function validateImportFiles() {
 
   const isValid = errors.length === 0;
   confirmImportButton.disabled = !isValid;
-  setImportStatus(
-    isValid
-      ? "Validation complete. Review preview summary and confirm import."
-      : "Validation completed with errors. Resolve errors before importing.",
-    !isValid
-  );
+  const successMessage = subscriptionsFile && renewalsFile
+    ? "Validation complete for subscriptions.csv + renewals.csv. Review preview and confirm import."
+    : subscriptionsFile
+      ? "Validation complete for subscriptions.csv. Review preview and confirm import."
+      : "Validation complete for renewals.csv. Review preview and confirm import.";
+  setImportStatus(isValid ? successMessage : "Validation completed with errors. Resolve errors before importing.", !isValid);
 }
 
 async function confirmHistoricalImport() {
