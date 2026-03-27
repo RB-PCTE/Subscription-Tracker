@@ -109,6 +109,7 @@ let activeView = "dashboard";
 let searchRefreshTimer = null;
 let subscriptionsColumnInventory = new Set();
 let dashboardTimeScaleDays = Number.parseInt(dashboardTimeScale?.value || "90", 10) || 90;
+let workbenchDrillFilter = null;
 
 const ROLE_PERMISSIONS = {
   admin: { canAdd: true, canEdit: true, canDelete: true, canManageUsers: true },
@@ -826,6 +827,47 @@ function formatRemainingDays(daysUntilEndDate) {
   return daysUntilEndDate === 1 ? "1 day remaining" : `${daysUntilEndDate} days remaining`;
 }
 
+function getStatusClassName(statusValue = "") {
+  return statusValue.toString().trim().toLowerCase().replace(/\s+/g, "-");
+}
+
+function isActionableStatus(statusValue = "") {
+  return ["quote", "invoice", "final warning", "attn required"].includes((statusValue || "").toString().trim().toLowerCase());
+}
+
+function rowMatchesWorkbenchFilter(row, filter = null) {
+  if (!filter || typeof filter !== "object") {
+    return true;
+  }
+
+  const statusValue = safeCalculateSubscriptionStatus(row);
+  const daysUntil = getDaysUntilEndDate(row);
+
+  if (filter.subscriptionId && row?.id !== filter.subscriptionId) {
+    return false;
+  }
+
+  if (Array.isArray(filter.statuses) && filter.statuses.length && !filter.statuses.includes(statusValue)) {
+    return false;
+  }
+
+  if (Number.isFinite(filter.minDays) && (!Number.isFinite(daysUntil) || daysUntil < filter.minDays)) {
+    return false;
+  }
+
+  if (Number.isFinite(filter.maxDays) && (!Number.isFinite(daysUntil) || daysUntil > filter.maxDays)) {
+    return false;
+  }
+
+  if (filter.inWindowOnly) {
+    if (!Number.isFinite(daysUntil) || daysUntil < 0 || daysUntil > dashboardTimeScaleDays) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
 function getDashboardWindow(days) {
   const start = parseDateStartOfDay(new Date()) || new Date();
   const end = new Date(start);
@@ -859,7 +901,12 @@ function createDashboardInsightButton({ title, value, subtitle, action, colorCla
   button.type = "button";
   button.className = `metric-card dashboard-insight-card ${colorClass}`.trim();
   button.dataset.dashboardAction = action;
-  button.innerHTML = `<h3>${escapeHtml(title)}</h3><p>${escapeHtml(String(value))}</p><span>${escapeHtml(subtitle || "")}</span>`;
+  button.innerHTML = `
+    <h3>${escapeHtml(title)}</h3>
+    <p>${escapeHtml(String(value))}</p>
+    <span>${escapeHtml(subtitle || "")}</span>
+    <small class="dashboard-insight-cta">Open</small>
+  `;
   return button;
 }
 
@@ -875,6 +922,7 @@ function renderDashboardSummary(windowDays) {
     return;
   }
 
+  const { rows: timelineRows } = getDashboardTimelineRows(windowDays);
   const activeCount = subscriptions.filter((row) => safeCalculateSubscriptionStatus(row) === "active").length;
   const dueSoonCount = subscriptions.filter((row) => {
     const daysUntil = getDaysUntilEndDate(row);
@@ -884,7 +932,7 @@ function renderDashboardSummary(windowDays) {
     const status = safeCalculateSubscriptionStatus(row);
     return status === "final warning" || status === "attn required";
   }).length;
-  const workloadCount = getDashboardTimelineRows(windowDays).rows.length;
+  const workloadCount = timelineRows.length;
 
   dashboardSummaryCards.innerHTML = "";
   dashboardSummaryCards.append(
@@ -897,7 +945,7 @@ function renderDashboardSummary(windowDays) {
     createDashboardInsightButton({
       title: "Active subscriptions",
       value: activeCount,
-      subtitle: "Filter to Active in Subscriptions",
+      subtitle: "Open active workload queue",
       action: "drill-status-active",
       colorClass: "dashboard-insight-active",
     }),
@@ -905,7 +953,7 @@ function renderDashboardSummary(windowDays) {
       title: "Due in next 30 days",
       value: dueSoonCount,
       subtitle: "Near-term renewal workload",
-      action: "drill-workbench-all",
+      action: "drill-workbench-due-0-30",
       colorClass: "dashboard-insight-warning",
     }),
     createDashboardInsightButton({
@@ -918,8 +966,8 @@ function renderDashboardSummary(windowDays) {
     createDashboardInsightButton({
       title: `In ${windowDays}-day window`,
       value: workloadCount,
-      subtitle: "Items represented on timeline",
-      action: "drill-workbench-all",
+      subtitle: "Timeline subscriptions in selected horizon",
+      action: "drill-workbench-window",
     })
   );
 }
@@ -954,8 +1002,8 @@ function renderDashboardTimeline(windowDays = dashboardTimeScaleDays) {
   rows.slice(0, 18).forEach(({ row, status, endDate, startDate, daysUntil }) => {
     const item = document.createElement("button");
     item.type = "button";
-    item.className = "dashboard-timeline-item";
-    item.dataset.dashboardAction = "open-subscription";
+    item.className = `dashboard-timeline-item status-${getStatusClassName(status)}`;
+    item.dataset.dashboardAction = isActionableStatus(status) ? "open-workbench-subscription" : "open-subscription";
     item.dataset.subscriptionId = row.id;
 
     const itemStart = startDate && startDate < start ? start : startDate || start;
@@ -963,34 +1011,42 @@ function renderDashboardTimeline(windowDays = dashboardTimeScaleDays) {
     const itemEndDays = Math.max(itemStartDays + 1, Math.floor((endDate.getTime() - start.getTime()) / (1000 * 60 * 60 * 24)));
     const leftPercent = Math.max(0, Math.min(100, (itemStartDays / windowDays) * 100));
     const widthPercent = Math.max(2, Math.min(100 - leftPercent, ((itemEndDays - itemStartDays) / windowDays) * 100));
+    const duePositionPercent = Math.max(0, Math.min(100, (itemEndDays / windowDays) * 100));
 
     item.innerHTML = `
       <div class="dashboard-timeline-item-head">
-        <p><strong>${escapeHtml(formatSubscriptionName(row))}</strong></p>
-        <span class="status-pill status-${status.replace(/\s+/g, "-")}">${toStatusLabel(status)}</span>
+        <div>
+          <p><strong>${escapeHtml(formatSubscriptionName(row))}</strong></p>
+          <p class="dashboard-timeline-customer">${escapeHtml(getCustomerDisplayName(row))}</p>
+        </div>
+        <span class="status-pill status-${getStatusClassName(status)}">${toStatusLabel(status)}</span>
       </div>
-      <p>${escapeHtml(getCustomerDisplayName(row))}</p>
-      <p class="dashboard-timeline-item-meta">${escapeHtml(formatRemainingDays(daysUntil))} • Due ${escapeHtml(
-      formatDate(toIsoDateString(endDate))
-    )}</p>
+      <div class="dashboard-timeline-item-meta-row">
+        <p class="dashboard-timeline-item-meta">${escapeHtml(formatRemainingDays(daysUntil))}</p>
+        <p class="dashboard-timeline-item-meta">Due ${escapeHtml(formatDate(toIsoDateString(endDate)))}</p>
+      </div>
       <div class="dashboard-timeline-track">
-        <span class="dashboard-timeline-bar status-${status.replace(/\s+/g, "-")}" style="left:${leftPercent}%;width:${widthPercent}%"></span>
+        <span class="dashboard-timeline-bar status-${getStatusClassName(status)}" style="left:${leftPercent}%;width:${widthPercent}%"></span>
+        <span class="dashboard-timeline-due-marker" style="left:${duePositionPercent}%"></span>
       </div>
+      <p class="dashboard-timeline-item-cta">${isActionableStatus(status) ? "Open in Workbench →" : "Open subscription details →"}</p>
     `;
     dashboardTimeline.appendChild(item);
   });
 }
 
-function renderDashboardStatusBreakdown() {
+function renderDashboardStatusBreakdown(windowDays = dashboardTimeScaleDays) {
   if (!dashboardStatusBreakdown) {
     return;
   }
 
-  const counts = subscriptions.reduce((acc, row) => {
-    const status = safeCalculateSubscriptionStatus(row);
+  const { rows } = getDashboardTimelineRows(windowDays);
+  const counts = rows.reduce((acc, item) => {
+    const status = item.status;
     acc.set(status, (acc.get(status) || 0) + 1);
     return acc;
   }, new Map());
+  const total = rows.length || 0;
 
   const orderedStatuses = [...counts.keys()].sort(
     (a, b) => (DASHBOARD_STATUS_ORDER.indexOf(a) === -1 ? 99 : DASHBOARD_STATUS_ORDER.indexOf(a)) -
@@ -999,42 +1055,76 @@ function renderDashboardStatusBreakdown() {
   dashboardStatusBreakdown.innerHTML = "";
 
   if (!orderedStatuses.length) {
-    dashboardStatusBreakdown.innerHTML = '<p class="helper-text">No statuses available yet.</p>';
+    dashboardStatusBreakdown.innerHTML = '<p class="helper-text">No statuses available in this planning window.</p>';
     return;
   }
 
+  const segmentedBar = document.createElement("div");
+  segmentedBar.className = "dashboard-status-segments";
+  orderedStatuses.forEach((status) => {
+    const value = counts.get(status) || 0;
+    const segment = document.createElement("button");
+    segment.type = "button";
+    segment.className = `dashboard-status-segment status-${getStatusClassName(status)}`;
+    segment.dataset.dashboardAction = `drill-status-${getStatusClassName(status)}`;
+    segment.title = `${toStatusLabel(status)}: ${value}`;
+    segment.style.width = `${Math.max(8, (value / Math.max(total, 1)) * 100)}%`;
+    segment.innerHTML = `<span>${toStatusLabel(status)}</span><strong>${value}</strong>`;
+    segmentedBar.appendChild(segment);
+  });
+  dashboardStatusBreakdown.appendChild(segmentedBar);
+
+  const detailList = document.createElement("div");
+  detailList.className = "dashboard-status-detail-list";
   orderedStatuses.forEach((status) => {
     const value = counts.get(status) || 0;
     const btn = document.createElement("button");
     btn.type = "button";
-    btn.className = "dashboard-chip";
-    btn.dataset.dashboardAction = `drill-status-${status.replace(/\s+/g, "-")}`;
-    btn.innerHTML = `<span class="status-pill status-${status.replace(/\s+/g, "-")}">${toStatusLabel(status)}</span><strong>${value}</strong>`;
-    dashboardStatusBreakdown.appendChild(btn);
+    btn.className = "dashboard-status-detail";
+    btn.dataset.dashboardAction = `drill-status-${getStatusClassName(status)}`;
+    btn.innerHTML = `<span class="status-pill status-${getStatusClassName(status)}">${toStatusLabel(status)}</span><strong>${value}</strong><small>Open queue</small>`;
+    detailList.appendChild(btn);
   });
+  dashboardStatusBreakdown.appendChild(detailList);
 }
 
-function renderDashboardDueBuckets() {
+function renderDashboardDueBuckets(windowDays = dashboardTimeScaleDays) {
   if (!dashboardDueBuckets) {
     return;
   }
 
   const buckets = [
-    { label: "Overdue", matcher: (days) => Number.isFinite(days) && days < 0, action: "drill-status-attn-required" },
-    { label: "0-30 days", matcher: (days) => Number.isFinite(days) && days >= 0 && days <= 30, action: "drill-workbench-all" },
-    { label: "31-60 days", matcher: (days) => Number.isFinite(days) && days >= 31 && days <= 60, action: "drill-workbench-all" },
-    { label: "61-90 days", matcher: (days) => Number.isFinite(days) && days >= 61 && days <= 90, action: "drill-workbench-all" },
-    { label: "90+ days", matcher: (days) => Number.isFinite(days) && days > 90, action: "drill-subscriptions-all" },
+    { label: "Overdue", className: "bucket-overdue", matcher: (days) => Number.isFinite(days) && days < 0, minDays: null, maxDays: -1 },
+    { label: "0–30 days", className: "bucket-0-30", matcher: (days) => Number.isFinite(days) && days >= 0 && days <= 30, minDays: 0, maxDays: 30 },
+    { label: "31–60 days", className: "bucket-31-60", matcher: (days) => Number.isFinite(days) && days >= 31 && days <= 60, minDays: 31, maxDays: 60 },
+    { label: "61–90 days", className: "bucket-61-90", matcher: (days) => Number.isFinite(days) && days >= 61 && days <= 90, minDays: 61, maxDays: 90 },
+    { label: "90+ days", className: "bucket-90-plus", matcher: (days) => Number.isFinite(days) && days > 90, minDays: 91, maxDays: null },
   ];
 
   dashboardDueBuckets.innerHTML = "";
   buckets.forEach((bucket) => {
-    const value = subscriptions.filter((row) => bucket.matcher(getDaysUntilEndDate(row))).length;
+    const matches = subscriptions.filter((row) => bucket.matcher(getDaysUntilEndDate(row)));
+    const inWindow = matches.filter((row) => {
+      const daysUntil = getDaysUntilEndDate(row);
+      return Number.isFinite(daysUntil) && daysUntil >= 0 && daysUntil <= windowDays;
+    }).length;
+    const value = matches.length;
     const card = document.createElement("button");
     card.type = "button";
-    card.className = "dashboard-due-card";
-    card.dataset.dashboardAction = bucket.action;
-    card.innerHTML = `<h4>${bucket.label}</h4><p>${value}</p>`;
+    card.className = `dashboard-due-card ${bucket.className}`.trim();
+    card.dataset.dashboardAction = "drill-workbench-due";
+    card.dataset.bucketLabel = bucket.label;
+    if (Number.isFinite(bucket.minDays)) {
+      card.dataset.minDays = String(bucket.minDays);
+    }
+    if (Number.isFinite(bucket.maxDays)) {
+      card.dataset.maxDays = String(bucket.maxDays);
+    }
+    card.innerHTML = `
+      <h4>${bucket.label}</h4>
+      <p>${value}</p>
+      <small>${inWindow} in ${windowDays}-day window</small>
+    `;
     dashboardDueBuckets.appendChild(card);
   });
 }
@@ -1042,8 +1132,8 @@ function renderDashboardDueBuckets() {
 function renderDashboard() {
   renderDashboardSummary(dashboardTimeScaleDays);
   renderDashboardTimeline(dashboardTimeScaleDays);
-  renderDashboardStatusBreakdown();
-  renderDashboardDueBuckets();
+  renderDashboardStatusBreakdown(dashboardTimeScaleDays);
+  renderDashboardDueBuckets(dashboardTimeScaleDays);
 }
 
 function getWorkflowFieldConfigByStatus(statusValue) {
@@ -1357,11 +1447,23 @@ function renderRenewalsPanel() {
 
   renewalsList.innerHTML = "";
   const { canEdit } = getCurrentPermissions();
+  let totalMatched = 0;
+
+  if (workbenchDrillFilter?.label) {
+    const banner = document.createElement("aside");
+    banner.className = "workbench-filter-banner";
+    banner.innerHTML = `
+      <p><strong>Dashboard filter:</strong> ${escapeHtml(workbenchDrillFilter.label)}</p>
+      <button type="button" class="secondary" data-action="clear-workbench-filter">Clear</button>
+    `;
+    renewalsList.appendChild(banner);
+  }
 
   WORKBENCH_GROUPS.forEach((group) => {
     const rowsInGroup = sortWorkbenchRowsByUrgency(
-      subscriptions.filter((row) => group.statuses.includes(safeCalculateSubscriptionStatus(row)))
+      subscriptions.filter((row) => group.statuses.includes(safeCalculateSubscriptionStatus(row)) && rowMatchesWorkbenchFilter(row, workbenchDrillFilter))
     );
+    totalMatched += rowsInGroup.length;
 
     const section = document.createElement("section");
     section.className = "renewal-workbench-group";
@@ -1445,6 +1547,13 @@ function renderRenewalsPanel() {
     section.appendChild(groupList);
     renewalsList.appendChild(section);
   });
+
+  if (workbenchDrillFilter && totalMatched === 0) {
+    const empty = document.createElement("article");
+    empty.className = "renewal-item";
+    empty.innerHTML = "<p>No workbench items match this dashboard filter.</p>";
+    renewalsList.appendChild(empty);
+  }
 }
 
 async function updateRenewalWorkflow(subscriptionId, payload) {
@@ -1594,6 +1703,12 @@ async function openWorkbenchHistoryDialog(subscriptionId) {
 function handleRenewalsWorkbenchClick(event) {
   const button = event.target.closest("button[data-action]");
   if (!button) {
+    return;
+  }
+
+  if (button.dataset.action === "clear-workbench-filter") {
+    workbenchDrillFilter = null;
+    renderRenewalsPanel();
     return;
   }
 
@@ -3204,9 +3319,24 @@ function handleDashboardClick(event) {
   }
 
   const action = trigger.dataset.dashboardAction;
+  const openWorkbenchWithFilter = (filter = null) => {
+    workbenchDrillFilter = filter;
+    setActiveView("renewals");
+    renderRenewalsPanel();
+  };
 
   if (action === "drill-workbench-all") {
-    setActiveView("renewals");
+    openWorkbenchWithFilter(null);
+    return;
+  }
+
+  if (action === "drill-workbench-window") {
+    openWorkbenchWithFilter({
+      label: `Due within ${dashboardTimeScaleDays} days`,
+      minDays: 0,
+      maxDays: dashboardTimeScaleDays,
+      inWindowOnly: true,
+    });
     return;
   }
 
@@ -3216,23 +3346,46 @@ function handleDashboardClick(event) {
   }
 
   if (action === "drill-status-needs-attention") {
-    const preferredStatus = Array.from(statusFilter.options).some((option) => option.value === "final warning")
-      ? "final warning"
-      : Array.from(statusFilter.options).some((option) => option.value === "attn required")
-        ? "attn required"
-        : "all";
-    drillToSubscriptions({ status: preferredStatus, sort: "start-date-asc" });
+    openWorkbenchWithFilter({
+      label: "Needs attention (Final Warning + Attn Required)",
+      statuses: ["final warning", "attn required"],
+    });
     return;
   }
 
   if (action.startsWith("drill-status-")) {
     const statusFromAction = action.replace("drill-status-", "").replace(/-/g, " ").trim();
     if (statusFromAction) {
+      if (["quote", "invoice", "final warning", "attn required", "active"].includes(statusFromAction)) {
+        openWorkbenchWithFilter({ label: `${toStatusLabel(statusFromAction)} queue`, statuses: [statusFromAction] });
+        return;
+      }
+
       const statusOptionExists = Array.from(statusFilter.options).some((option) => option.value === statusFromAction);
       if (statusOptionExists) {
         drillToSubscriptions({ status: statusFromAction, sort: "start-date-asc" });
         return;
       }
+    }
+  }
+
+  if (action === "drill-workbench-due") {
+    const label = (trigger.dataset.bucketLabel || "Due bucket").trim();
+    const minDays = Number.parseInt(trigger.dataset.minDays || "", 10);
+    const maxDays = Number.parseInt(trigger.dataset.maxDays || "", 10);
+    openWorkbenchWithFilter({
+      label: `${label} renewals`,
+      minDays: Number.isFinite(minDays) ? minDays : undefined,
+      maxDays: Number.isFinite(maxDays) ? maxDays : undefined,
+    });
+    return;
+  }
+
+  if (action.startsWith("drill-workbench-due-")) {
+    const range = action.replace("drill-workbench-due-", "");
+    if (range === "0-30") {
+      openWorkbenchWithFilter({ label: "Due in 0–30 days", minDays: 0, maxDays: 30 });
+      return;
     }
   }
 
@@ -3244,6 +3397,19 @@ function handleDashboardClick(event) {
     }
     setActiveView("subscriptions");
     openSubscriptionDetail(row);
+    return;
+  }
+
+  if (action === "open-workbench-subscription") {
+    const subscriptionId = trigger.dataset.subscriptionId;
+    if (!subscriptionId) {
+      return;
+    }
+    openWorkbenchWithFilter({ label: "Single renewal", subscriptionId, statuses: ["quote", "invoice", "final warning", "attn required", "active"] });
+    const target = renewalsList.querySelector(`[data-subscription-id="${subscriptionId}"]`);
+    if (target) {
+      target.scrollIntoView({ block: "center", behavior: "smooth" });
+    }
   }
 }
 
