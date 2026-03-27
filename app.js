@@ -20,6 +20,13 @@ const contentPanels = document.querySelectorAll(".content-panel");
 const metricTotalSubscriptions = document.getElementById("metric-total-subscriptions");
 const metricActiveSubscriptions = document.getElementById("metric-active-subscriptions");
 const metricUserRole = document.getElementById("metric-user-role");
+const dashboardTimeScale = document.getElementById("dashboard-time-scale");
+const dashboardSummaryCards = document.getElementById("dashboard-summary-cards");
+const dashboardTimelineCaption = document.getElementById("dashboard-timeline-caption");
+const dashboardTimelineAxis = document.getElementById("dashboard-timeline-axis");
+const dashboardTimeline = document.getElementById("dashboard-timeline");
+const dashboardStatusBreakdown = document.getElementById("dashboard-status-breakdown");
+const dashboardDueBuckets = document.getElementById("dashboard-due-buckets");
 
 const subscriptionsSection = document.getElementById("subscriptions-section");
 const addSubscriptionButton = document.getElementById("add-subscription-btn");
@@ -101,6 +108,7 @@ let loadingSubscriptions = false;
 let activeView = "dashboard";
 let searchRefreshTimer = null;
 let subscriptionsColumnInventory = new Set();
+let dashboardTimeScaleDays = Number.parseInt(dashboardTimeScale?.value || "90", 10) || 90;
 
 const ROLE_PERMISSIONS = {
   admin: { canAdd: true, canEdit: true, canDelete: true, canManageUsers: true },
@@ -154,6 +162,8 @@ const WORKFLOW_PROGRESS_LABELS = {
   churning: "Churning",
   "po promised": "PO promised",
 };
+
+const DASHBOARD_STATUS_ORDER = ["final warning", "invoice", "quote", "attn required", "active", "migrated", "churned", "unknown"];
 
 function getCurrentPermissions() {
   return ROLE_PERMISSIONS[currentUserRole] || { canAdd: false, canEdit: false, canDelete: false };
@@ -816,6 +826,226 @@ function formatRemainingDays(daysUntilEndDate) {
   return daysUntilEndDate === 1 ? "1 day remaining" : `${daysUntilEndDate} days remaining`;
 }
 
+function getDashboardWindow(days) {
+  const start = parseDateStartOfDay(new Date()) || new Date();
+  const end = new Date(start);
+  end.setDate(end.getDate() + days);
+  return { start, end };
+}
+
+function getDashboardTimelineRows(windowDays = dashboardTimeScaleDays) {
+  const { start, end } = getDashboardWindow(windowDays);
+  const rows = subscriptions
+    .map((row) => {
+      const endDate = parseDateStartOfDay(safeGetEndDateValue(row));
+      const startDate = parseDateStartOfDay(getCurrentTermStartDateValue(row));
+      const status = safeCalculateSubscriptionStatus(row);
+      const daysUntil = getDaysUntilEndDate(row);
+      return { row, endDate, startDate, status, daysUntil };
+    })
+    .filter(({ endDate }) => endDate && endDate <= end)
+    .sort((a, b) => {
+      if ((a.daysUntil ?? Number.POSITIVE_INFINITY) !== (b.daysUntil ?? Number.POSITIVE_INFINITY)) {
+        return (a.daysUntil ?? Number.POSITIVE_INFINITY) - (b.daysUntil ?? Number.POSITIVE_INFINITY);
+      }
+      return formatSubscriptionName(a.row).localeCompare(formatSubscriptionName(b.row));
+    });
+
+  return { rows, start, end };
+}
+
+function createDashboardInsightButton({ title, value, subtitle, action, colorClass = "" }) {
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = `metric-card dashboard-insight-card ${colorClass}`.trim();
+  button.dataset.dashboardAction = action;
+  button.innerHTML = `<h3>${escapeHtml(title)}</h3><p>${escapeHtml(String(value))}</p><span>${escapeHtml(subtitle || "")}</span>`;
+  return button;
+}
+
+function drillToSubscriptions({ status = "all", sort = "start-date-asc" } = {}) {
+  statusFilter.value = status;
+  sortControl.value = sort;
+  setActiveView("subscriptions");
+  refreshVisibleSubscriptions();
+}
+
+function renderDashboardSummary(windowDays) {
+  if (!dashboardSummaryCards) {
+    return;
+  }
+
+  const activeCount = subscriptions.filter((row) => safeCalculateSubscriptionStatus(row) === "active").length;
+  const dueSoonCount = subscriptions.filter((row) => {
+    const daysUntil = getDaysUntilEndDate(row);
+    return Number.isFinite(daysUntil) && daysUntil >= 0 && daysUntil <= 30;
+  }).length;
+  const needsAttentionCount = subscriptions.filter((row) => {
+    const status = safeCalculateSubscriptionStatus(row);
+    return status === "final warning" || status === "attn required";
+  }).length;
+  const workloadCount = getDashboardTimelineRows(windowDays).rows.length;
+
+  dashboardSummaryCards.innerHTML = "";
+  dashboardSummaryCards.append(
+    createDashboardInsightButton({
+      title: "Total subscriptions",
+      value: subscriptions.length,
+      subtitle: "Open full subscriptions register",
+      action: "drill-subscriptions-all",
+    }),
+    createDashboardInsightButton({
+      title: "Active subscriptions",
+      value: activeCount,
+      subtitle: "Filter to Active in Subscriptions",
+      action: "drill-status-active",
+      colorClass: "dashboard-insight-active",
+    }),
+    createDashboardInsightButton({
+      title: "Due in next 30 days",
+      value: dueSoonCount,
+      subtitle: "Near-term renewal workload",
+      action: "drill-workbench-all",
+      colorClass: "dashboard-insight-warning",
+    }),
+    createDashboardInsightButton({
+      title: "Needs attention",
+      value: needsAttentionCount,
+      subtitle: "Final warning + overdue records",
+      action: "drill-status-needs-attention",
+      colorClass: "dashboard-insight-urgent",
+    }),
+    createDashboardInsightButton({
+      title: `In ${windowDays}-day window`,
+      value: workloadCount,
+      subtitle: "Items represented on timeline",
+      action: "drill-workbench-all",
+    })
+  );
+}
+
+function renderDashboardTimeline(windowDays = dashboardTimeScaleDays) {
+  if (!dashboardTimeline || !dashboardTimelineAxis || !dashboardTimelineCaption) {
+    return;
+  }
+
+  const { rows, start, end } = getDashboardTimelineRows(windowDays);
+  dashboardTimeline.innerHTML = "";
+  dashboardTimelineAxis.innerHTML = "";
+  dashboardTimelineCaption.textContent = `${formatDate(toIsoDateString(start))} → ${formatDate(toIsoDateString(end))}`;
+
+  if (!rows.length) {
+    dashboardTimeline.innerHTML =
+      '<article class="renewal-item"><p>No renewals within this planning window. Try a longer time scale.</p></article>';
+    return;
+  }
+
+  const axisLabels = [0, 0.25, 0.5, 0.75, 1].map((marker) => {
+    const markerDate = new Date(start);
+    markerDate.setDate(markerDate.getDate() + Math.round(windowDays * marker));
+    return formatDate(toIsoDateString(markerDate));
+  });
+  axisLabels.forEach((label) => {
+    const tag = document.createElement("span");
+    tag.textContent = label;
+    dashboardTimelineAxis.appendChild(tag);
+  });
+
+  rows.slice(0, 18).forEach(({ row, status, endDate, startDate, daysUntil }) => {
+    const item = document.createElement("button");
+    item.type = "button";
+    item.className = "dashboard-timeline-item";
+    item.dataset.dashboardAction = "open-subscription";
+    item.dataset.subscriptionId = row.id;
+
+    const itemStart = startDate && startDate < start ? start : startDate || start;
+    const itemStartDays = Math.max(0, Math.floor((itemStart.getTime() - start.getTime()) / (1000 * 60 * 60 * 24)));
+    const itemEndDays = Math.max(itemStartDays + 1, Math.floor((endDate.getTime() - start.getTime()) / (1000 * 60 * 60 * 24)));
+    const leftPercent = Math.max(0, Math.min(100, (itemStartDays / windowDays) * 100));
+    const widthPercent = Math.max(2, Math.min(100 - leftPercent, ((itemEndDays - itemStartDays) / windowDays) * 100));
+
+    item.innerHTML = `
+      <div class="dashboard-timeline-item-head">
+        <p><strong>${escapeHtml(formatSubscriptionName(row))}</strong></p>
+        <span class="status-pill status-${status.replace(/\s+/g, "-")}">${toStatusLabel(status)}</span>
+      </div>
+      <p>${escapeHtml(getCustomerDisplayName(row))}</p>
+      <p class="dashboard-timeline-item-meta">${escapeHtml(formatRemainingDays(daysUntil))} • Due ${escapeHtml(
+      formatDate(toIsoDateString(endDate))
+    )}</p>
+      <div class="dashboard-timeline-track">
+        <span class="dashboard-timeline-bar status-${status.replace(/\s+/g, "-")}" style="left:${leftPercent}%;width:${widthPercent}%"></span>
+      </div>
+    `;
+    dashboardTimeline.appendChild(item);
+  });
+}
+
+function renderDashboardStatusBreakdown() {
+  if (!dashboardStatusBreakdown) {
+    return;
+  }
+
+  const counts = subscriptions.reduce((acc, row) => {
+    const status = safeCalculateSubscriptionStatus(row);
+    acc.set(status, (acc.get(status) || 0) + 1);
+    return acc;
+  }, new Map());
+
+  const orderedStatuses = [...counts.keys()].sort(
+    (a, b) => (DASHBOARD_STATUS_ORDER.indexOf(a) === -1 ? 99 : DASHBOARD_STATUS_ORDER.indexOf(a)) -
+      (DASHBOARD_STATUS_ORDER.indexOf(b) === -1 ? 99 : DASHBOARD_STATUS_ORDER.indexOf(b))
+  );
+  dashboardStatusBreakdown.innerHTML = "";
+
+  if (!orderedStatuses.length) {
+    dashboardStatusBreakdown.innerHTML = '<p class="helper-text">No statuses available yet.</p>';
+    return;
+  }
+
+  orderedStatuses.forEach((status) => {
+    const value = counts.get(status) || 0;
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "dashboard-chip";
+    btn.dataset.dashboardAction = `drill-status-${status.replace(/\s+/g, "-")}`;
+    btn.innerHTML = `<span class="status-pill status-${status.replace(/\s+/g, "-")}">${toStatusLabel(status)}</span><strong>${value}</strong>`;
+    dashboardStatusBreakdown.appendChild(btn);
+  });
+}
+
+function renderDashboardDueBuckets() {
+  if (!dashboardDueBuckets) {
+    return;
+  }
+
+  const buckets = [
+    { label: "Overdue", matcher: (days) => Number.isFinite(days) && days < 0, action: "drill-status-attn-required" },
+    { label: "0-30 days", matcher: (days) => Number.isFinite(days) && days >= 0 && days <= 30, action: "drill-workbench-all" },
+    { label: "31-60 days", matcher: (days) => Number.isFinite(days) && days >= 31 && days <= 60, action: "drill-workbench-all" },
+    { label: "61-90 days", matcher: (days) => Number.isFinite(days) && days >= 61 && days <= 90, action: "drill-workbench-all" },
+    { label: "90+ days", matcher: (days) => Number.isFinite(days) && days > 90, action: "drill-subscriptions-all" },
+  ];
+
+  dashboardDueBuckets.innerHTML = "";
+  buckets.forEach((bucket) => {
+    const value = subscriptions.filter((row) => bucket.matcher(getDaysUntilEndDate(row))).length;
+    const card = document.createElement("button");
+    card.type = "button";
+    card.className = "dashboard-due-card";
+    card.dataset.dashboardAction = bucket.action;
+    card.innerHTML = `<h4>${bucket.label}</h4><p>${value}</p>`;
+    dashboardDueBuckets.appendChild(card);
+  });
+}
+
+function renderDashboard() {
+  renderDashboardSummary(dashboardTimeScaleDays);
+  renderDashboardTimeline(dashboardTimeScaleDays);
+  renderDashboardStatusBreakdown();
+  renderDashboardDueBuckets();
+}
+
 function getWorkflowFieldConfigByStatus(statusValue) {
   if (!statusValue || !WORKFLOW_PROGRESS_OPTIONS[statusValue]) {
     return null;
@@ -1107,9 +1337,16 @@ function renderSubscriptions(rows) {
 
 function updateDashboardMetrics() {
   const activeCount = subscriptions.filter((row) => safeCalculateSubscriptionStatus(row) === "active").length;
-  metricTotalSubscriptions.textContent = String(subscriptions.length);
-  metricActiveSubscriptions.textContent = String(activeCount);
-  metricUserRole.textContent = currentUserRole || "signed out";
+  if (metricTotalSubscriptions) {
+    metricTotalSubscriptions.textContent = String(subscriptions.length);
+  }
+  if (metricActiveSubscriptions) {
+    metricActiveSubscriptions.textContent = String(activeCount);
+  }
+  if (metricUserRole) {
+    metricUserRole.textContent = currentUserRole || "signed out";
+  }
+  renderDashboard();
 }
 
 function renderRenewalsPanel() {
@@ -2691,7 +2928,9 @@ async function renderAuthState(user) {
 
   if (!isSignedIn) {
     setRoleStatus("Role: signed out");
-    metricUserRole.textContent = "signed out";
+    if (metricUserRole) {
+      metricUserRole.textContent = "signed out";
+    }
     applyRoleUi();
     clearSubscriptions();
     clearUserManagementTables();
@@ -2706,7 +2945,9 @@ async function renderAuthState(user) {
 
     if (!role) {
       setRoleStatus("Role: not authorised", true);
-      metricUserRole.textContent = "not authorised";
+      if (metricUserRole) {
+        metricUserRole.textContent = "not authorised";
+      }
       subscriptionsSection.hidden = true;
       applyRoleUi();
       clearSubscriptions();
@@ -2726,19 +2967,22 @@ async function renderAuthState(user) {
       setRoleStatus(`Role: ${role}`);
     }
 
-    metricUserRole.textContent = role;
+    if (metricUserRole) {
+      metricUserRole.textContent = role;
+    }
     applyRoleUi();
     subscriptionsSection.hidden = false;
     void loadSubscriptions();
     void loadUserManagement();
   } catch (error) {
     console.error("fetchUserRole error", error);
-    setRoleStatus("Role: unavailable", true);
-    subscriptionsSection.hidden = true;
+    currentUserRole = "viewer";
+    setRoleStatus("Role: unavailable (viewer fallback)", true);
+    subscriptionsSection.hidden = false;
     applyRoleUi();
-    clearSubscriptions();
     clearUserManagementTables();
-    setStatus(`Signed in, but unable to load your role: ${error.message}`, true);
+    setStatus(`Signed in with limited access while role lookup failed: ${error.message}`, true);
+    void loadSubscriptions({ source: "role-fallback" });
   }
 }
 
@@ -2947,6 +3191,62 @@ function handleNavClick(event) {
   setActiveView(button.dataset.navTarget);
 }
 
+function handleDashboardTimeScaleChange() {
+  const nextDays = Number.parseInt(dashboardTimeScale?.value || "", 10);
+  dashboardTimeScaleDays = Number.isFinite(nextDays) && nextDays > 0 ? nextDays : 90;
+  renderDashboard();
+}
+
+function handleDashboardClick(event) {
+  const trigger = event.target.closest("[data-dashboard-action]");
+  if (!trigger?.dataset.dashboardAction) {
+    return;
+  }
+
+  const action = trigger.dataset.dashboardAction;
+
+  if (action === "drill-workbench-all") {
+    setActiveView("renewals");
+    return;
+  }
+
+  if (action === "drill-subscriptions-all") {
+    drillToSubscriptions({ status: "all", sort: "start-date-asc" });
+    return;
+  }
+
+  if (action === "drill-status-needs-attention") {
+    const preferredStatus = Array.from(statusFilter.options).some((option) => option.value === "final warning")
+      ? "final warning"
+      : Array.from(statusFilter.options).some((option) => option.value === "attn required")
+        ? "attn required"
+        : "all";
+    drillToSubscriptions({ status: preferredStatus, sort: "start-date-asc" });
+    return;
+  }
+
+  if (action.startsWith("drill-status-")) {
+    const statusFromAction = action.replace("drill-status-", "").replace(/-/g, " ").trim();
+    if (statusFromAction) {
+      const statusOptionExists = Array.from(statusFilter.options).some((option) => option.value === statusFromAction);
+      if (statusOptionExists) {
+        drillToSubscriptions({ status: statusFromAction, sort: "start-date-asc" });
+        return;
+      }
+    }
+  }
+
+  if (action === "open-subscription") {
+    const subscriptionId = trigger.dataset.subscriptionId;
+    const row = subscriptions.find((item) => item.id === subscriptionId);
+    if (!row) {
+      return;
+    }
+    setActiveView("subscriptions");
+    openSubscriptionDetail(row);
+  }
+}
+
 searchInput.addEventListener("input", scheduleSearchRefresh);
 statusFilter.addEventListener("change", refreshVisibleSubscriptions);
 frequencyFilter.addEventListener("change", () => {
@@ -2962,6 +3262,8 @@ newSubscriptionCta.addEventListener("click", () => {
   openSubscriptionModal("create");
 });
 document.querySelector(".sidebar-nav").addEventListener("click", handleNavClick);
+dashboardTimeScale?.addEventListener("change", handleDashboardTimeScaleChange);
+document.getElementById("dashboard-section")?.addEventListener("click", handleDashboardClick);
 subscriptionsBody.addEventListener("click", handleTableClick);
 subscriptionsBody.addEventListener("toggle", handleActionMenuToggle, true);
 document.addEventListener("click", handleDocumentClick);
