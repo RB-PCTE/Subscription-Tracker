@@ -1094,11 +1094,11 @@ function renderDashboardDueBuckets(windowDays = dashboardTimeScaleDays) {
   }
 
   const buckets = [
-    { label: "Overdue", className: "bucket-overdue", matcher: (days) => Number.isFinite(days) && days < 0, minDays: null, maxDays: -1 },
-    { label: "0–30 days", className: "bucket-0-30", matcher: (days) => Number.isFinite(days) && days >= 0 && days <= 30, minDays: 0, maxDays: 30 },
-    { label: "31–60 days", className: "bucket-31-60", matcher: (days) => Number.isFinite(days) && days >= 31 && days <= 60, minDays: 31, maxDays: 60 },
-    { label: "61–90 days", className: "bucket-61-90", matcher: (days) => Number.isFinite(days) && days >= 61 && days <= 90, minDays: 61, maxDays: 90 },
-    { label: "90+ days", className: "bucket-90-plus", matcher: (days) => Number.isFinite(days) && days > 90, minDays: 91, maxDays: null },
+    { label: "Overdue", className: "bucket-overdue", matcher: (days) => Number.isFinite(days) && days < 0, action: "drill-workbench-due-overdue" },
+    { label: "0–30 days", className: "bucket-0-30", matcher: (days) => Number.isFinite(days) && days >= 0 && days <= 30, action: "drill-workbench-due-0-30" },
+    { label: "31–60 days", className: "bucket-31-60", matcher: (days) => Number.isFinite(days) && days >= 31 && days <= 60, action: "drill-workbench-due-31-60" },
+    { label: "61–90 days", className: "bucket-61-90", matcher: (days) => Number.isFinite(days) && days >= 61 && days <= 90, action: "drill-workbench-due-61-90" },
+    { label: "90+ days", className: "bucket-90-plus", matcher: (days) => Number.isFinite(days) && days > 90, action: "drill-workbench-due-90-plus" },
   ];
 
   dashboardDueBuckets.innerHTML = "";
@@ -1112,14 +1112,7 @@ function renderDashboardDueBuckets(windowDays = dashboardTimeScaleDays) {
     const card = document.createElement("button");
     card.type = "button";
     card.className = `dashboard-due-card ${bucket.className}`.trim();
-    card.dataset.dashboardAction = "drill-workbench-due";
-    card.dataset.bucketLabel = bucket.label;
-    if (Number.isFinite(bucket.minDays)) {
-      card.dataset.minDays = String(bucket.minDays);
-    }
-    if (Number.isFinite(bucket.maxDays)) {
-      card.dataset.maxDays = String(bucket.maxDays);
-    }
+    card.dataset.dashboardAction = bucket.action;
     card.innerHTML = `
       <h4>${bucket.label}</h4>
       <p>${value}</p>
@@ -3369,22 +3362,26 @@ function handleDashboardClick(event) {
     }
   }
 
-  if (action === "drill-workbench-due") {
-    const label = (trigger.dataset.bucketLabel || "Due bucket").trim();
-    const minDays = Number.parseInt(trigger.dataset.minDays || "", 10);
-    const maxDays = Number.parseInt(trigger.dataset.maxDays || "", 10);
-    openWorkbenchWithFilter({
-      label: `${label} renewals`,
-      minDays: Number.isFinite(minDays) ? minDays : undefined,
-      maxDays: Number.isFinite(maxDays) ? maxDays : undefined,
-    });
-    return;
-  }
-
   if (action.startsWith("drill-workbench-due-")) {
     const range = action.replace("drill-workbench-due-", "");
+    if (range === "overdue") {
+      openWorkbenchWithFilter({ label: "Overdue renewals", maxDays: -1 });
+      return;
+    }
     if (range === "0-30") {
       openWorkbenchWithFilter({ label: "Due in 0–30 days", minDays: 0, maxDays: 30 });
+      return;
+    }
+    if (range === "31-60") {
+      openWorkbenchWithFilter({ label: "Due in 31–60 days", minDays: 31, maxDays: 60 });
+      return;
+    }
+    if (range === "61-90") {
+      openWorkbenchWithFilter({ label: "Due in 61–90 days", minDays: 61, maxDays: 90 });
+      return;
+    }
+    if (range === "90-plus") {
+      openWorkbenchWithFilter({ label: "Due in 90+ days", minDays: 91 });
       return;
     }
   }
