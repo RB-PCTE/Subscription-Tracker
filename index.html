@@ -48,23 +48,53 @@
         </header>
 
         <main class="content-area">
-          <section id="dashboard-section" class="card content-panel" data-view="dashboard" aria-labelledby="dashboard-heading">
-            <h2 id="dashboard-heading">Dashboard</h2>
-            <p class="helper-text">Quick snapshot of your workspace and authentication state.</p>
+                    <section id="dashboard-section" class="card content-panel" data-view="dashboard" aria-labelledby="dashboard-heading">
+            <div class="page-header dashboard-header">
+              <div>
+                <h2 id="dashboard-heading">Dashboard</h2>
+                <p class="helper-text">Visual planning board for upcoming renewal workload and drill-down insights.</p>
+              </div>
+              <label class="toolbar-field dashboard-scale-field" for="dashboard-time-scale">
+                <span>Planning window</span>
+                <select id="dashboard-time-scale" aria-label="Select dashboard planning window">
+                  <option value="30">Next 30 days</option>
+                  <option value="60">Next 60 days</option>
+                  <option value="90" selected>Next 90 days</option>
+                  <option value="180">Next 6 months</option>
+                  <option value="365">Next 12 months</option>
+                </select>
+              </label>
+            </div>
 
-            <div class="dashboard-grid">
-              <article class="metric-card">
-                <h3>Total subscriptions</h3>
-                <p id="metric-total-subscriptions">0</p>
-              </article>
-              <article class="metric-card">
-                <h3>Active subscriptions tracked</h3>
-                <p id="metric-active-subscriptions">0</p>
-              </article>
-              <article class="metric-card">
-                <h3>Your role</h3>
-                <p id="metric-user-role">signed out</p>
-              </article>
+            <div id="dashboard-summary-cards" class="dashboard-grid dashboard-summary-grid" role="list"></div>
+
+            <section class="card nested-card dashboard-visual-card" aria-labelledby="dashboard-timeline-heading">
+              <div class="dashboard-section-header">
+                <h3 id="dashboard-timeline-heading">Renewal timeline</h3>
+                <button type="button" class="secondary dashboard-link-btn" data-dashboard-action="drill-workbench-all">
+                  Open Workbench
+                </button>
+              </div>
+              <p id="dashboard-timeline-caption" class="helper-text"></p>
+              <div id="dashboard-timeline-axis" class="dashboard-timeline-axis" aria-hidden="true"></div>
+              <div id="dashboard-timeline" class="dashboard-timeline" role="list"></div>
+            </section>
+
+            <div class="dashboard-secondary-grid">
+              <section class="card nested-card" aria-labelledby="dashboard-status-heading">
+                <div class="dashboard-section-header">
+                  <h3 id="dashboard-status-heading">Workload by status</h3>
+                  <button type="button" class="secondary dashboard-link-btn" data-dashboard-action="drill-subscriptions-all">View all</button>
+                </div>
+                <div id="dashboard-status-breakdown" class="dashboard-status-breakdown" role="list"></div>
+              </section>
+
+              <section class="card nested-card" aria-labelledby="dashboard-due-heading">
+                <div class="dashboard-section-header">
+                  <h3 id="dashboard-due-heading">Due urgency buckets</h3>
+                </div>
+                <div id="dashboard-due-buckets" class="dashboard-due-buckets" role="list"></div>
+              </section>
             </div>
 
             <section class="card nested-card" aria-labelledby="auth-heading">

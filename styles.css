@@ -230,10 +230,24 @@ h3 {
   gap: var(--space-4);
 }
 
+.dashboard-header {
+  margin-bottom: var(--space-4);
+  align-items: end;
+}
+
+.dashboard-scale-field {
+  min-width: 210px;
+}
+
+.dashboard-summary-grid {
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+}
+
 .metric-card {
   background: var(--color-bg-muted);
   border-radius: var(--radius-md);
   padding: var(--space-4);
+  border: 1px solid transparent;
 }
 
 .metric-card h3 {
@@ -244,6 +258,183 @@ h3 {
 .metric-card p {
   margin: 0;
   font-size: var(--font-size-lg);
+  font-weight: 600;
+}
+
+.dashboard-insight-card {
+  text-align: left;
+  cursor: pointer;
+  transition: border-color 0.15s ease, transform 0.15s ease;
+}
+
+.dashboard-insight-card span {
+  display: block;
+  margin-top: var(--space-2);
+  font-size: 0.82rem;
+  color: var(--color-text-secondary);
+}
+
+.dashboard-insight-card:hover {
+  border-color: #cbd5e1;
+  transform: translateY(-1px);
+}
+
+.dashboard-insight-warning {
+  background: #fff7ed;
+}
+
+.dashboard-insight-urgent {
+  background: #fff1f2;
+}
+
+.dashboard-insight-active {
+  background: #ecfdf5;
+}
+
+.dashboard-visual-card {
+  margin-top: var(--space-4);
+}
+
+.dashboard-section-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  margin-bottom: var(--space-2);
+}
+
+.dashboard-link-btn {
+  padding: 0.35rem 0.65rem;
+}
+
+.dashboard-timeline-axis {
+  margin-top: var(--space-3);
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  font-size: 0.75rem;
+  color: var(--color-text-secondary);
+}
+
+.dashboard-timeline-axis span:nth-child(n + 2) {
+  justify-self: end;
+}
+
+.dashboard-timeline {
+  display: grid;
+  gap: var(--space-3);
+  margin-top: var(--space-3);
+}
+
+.dashboard-timeline-item {
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  padding: var(--space-3);
+  background: #ffffff;
+  text-align: left;
+  cursor: pointer;
+}
+
+.dashboard-timeline-item:hover {
+  border-color: #cbd5e1;
+}
+
+.dashboard-timeline-item p {
+  margin: 0 0 var(--space-1);
+}
+
+.dashboard-timeline-item-meta {
+  color: var(--color-text-secondary);
+  font-size: 0.82rem;
+}
+
+.dashboard-timeline-item-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+
+.dashboard-timeline-track {
+  margin-top: var(--space-2);
+  position: relative;
+  height: 8px;
+  border-radius: 999px;
+  background: #e2e8f0;
+}
+
+.dashboard-timeline-bar {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  border-radius: 999px;
+  background: #64748b;
+}
+
+.dashboard-timeline-bar.status-active {
+  background: #0ea5a4;
+}
+
+.dashboard-timeline-bar.status-quote {
+  background: #0ea5e9;
+}
+
+.dashboard-timeline-bar.status-invoice {
+  background: #f59e0b;
+}
+
+.dashboard-timeline-bar.status-final-warning,
+.dashboard-timeline-bar.status-attn-required {
+  background: #ef4444;
+}
+
+.dashboard-secondary-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-4);
+  margin-top: var(--space-4);
+}
+
+.dashboard-status-breakdown {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.dashboard-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  border: 1px solid var(--color-border);
+  background: #ffffff;
+  border-radius: 999px;
+  padding: 0.3rem 0.55rem;
+  cursor: pointer;
+}
+
+.dashboard-due-buckets {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
+  gap: var(--space-2);
+}
+
+.dashboard-due-card {
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: #ffffff;
+  text-align: left;
+  padding: var(--space-3);
+  cursor: pointer;
+}
+
+.dashboard-due-card h4 {
+  margin: 0;
+  font-size: 0.82rem;
+  color: var(--color-text-secondary);
+}
+
+.dashboard-due-card p {
+  margin: var(--space-1) 0 0;
+  font-size: 1.1rem;
   font-weight: 600;
 }
 
@@ -870,6 +1061,10 @@ dialog::backdrop {
   }
 
   .dashboard-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .dashboard-secondary-grid {
     grid-template-columns: 1fr;
   }
 
