@@ -2976,12 +2976,13 @@ async function renderAuthState(user) {
     void loadUserManagement();
   } catch (error) {
     console.error("fetchUserRole error", error);
-    setRoleStatus("Role: unavailable", true);
-    subscriptionsSection.hidden = true;
+    currentUserRole = "viewer";
+    setRoleStatus("Role: unavailable (viewer fallback)", true);
+    subscriptionsSection.hidden = false;
     applyRoleUi();
-    clearSubscriptions();
     clearUserManagementTables();
-    setStatus(`Signed in, but unable to load your role: ${error.message}`, true);
+    setStatus(`Signed in with limited access while role lookup failed: ${error.message}`, true);
+    void loadSubscriptions({ source: "role-fallback" });
   }
 }
 
