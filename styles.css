@@ -224,51 +224,6 @@ h3 {
   color: var(--color-text-secondary);
 }
 
-.import-card {
-  margin-top: var(--space-4);
-}
-
-.import-grid {
-  display: grid;
-  gap: var(--space-3);
-  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-}
-
-.import-grid label {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-2);
-  font-size: var(--font-size-sm);
-}
-
-.import-template-actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--space-2);
-  margin-bottom: var(--space-3);
-}
-
-.import-preview,
-.import-results,
-.import-errors {
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-md);
-  background: #f8fafc;
-  padding: var(--space-3);
-  min-height: 64px;
-}
-
-.import-preview ul,
-.import-results ul,
-.import-errors ul {
-  margin: var(--space-2) 0 0;
-  padding-left: 1.2rem;
-}
-
-.import-errors {
-  margin-top: var(--space-3);
-}
-
 .dashboard-grid {
   display: grid;
   grid-template-columns: repeat(3, minmax(140px, 1fr));
