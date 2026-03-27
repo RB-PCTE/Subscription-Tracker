@@ -265,19 +265,13 @@ h3 {
   text-align: left;
   cursor: pointer;
   transition: border-color 0.15s ease, transform 0.15s ease;
-  color: var(--color-text-primary);
 }
 
 .dashboard-insight-card span {
   display: block;
   margin-top: var(--space-2);
   font-size: 0.82rem;
-  color: #4b5563;
-}
-
-.dashboard-insight-card h3,
-.dashboard-insight-card p {
-  color: var(--color-text-primary);
+  color: var(--color-text-secondary);
 }
 
 .dashboard-insight-card:hover {
@@ -318,7 +312,7 @@ h3 {
   display: grid;
   grid-template-columns: repeat(5, 1fr);
   font-size: 0.75rem;
-  color: #4b5563;
+  color: var(--color-text-secondary);
 }
 
 .dashboard-timeline-axis span:nth-child(n + 2) {
@@ -338,7 +332,6 @@ h3 {
   background: #ffffff;
   text-align: left;
   cursor: pointer;
-  color: var(--color-text-primary);
 }
 
 .dashboard-timeline-item:hover {
@@ -350,7 +343,7 @@ h3 {
 }
 
 .dashboard-timeline-item-meta {
-  color: #4b5563;
+  color: var(--color-text-secondary);
   font-size: 0.82rem;
 }
 
@@ -413,14 +406,9 @@ h3 {
   gap: var(--space-2);
   border: 1px solid var(--color-border);
   background: #ffffff;
-  color: var(--color-text-primary);
   border-radius: 999px;
   padding: 0.3rem 0.55rem;
   cursor: pointer;
-}
-
-.dashboard-chip strong {
-  color: #111827;
 }
 
 .dashboard-due-buckets {
@@ -433,7 +421,6 @@ h3 {
   border: 1px solid var(--color-border);
   border-radius: var(--radius-md);
   background: #ffffff;
-  color: var(--color-text-primary);
   text-align: left;
   padding: var(--space-3);
   cursor: pointer;
@@ -442,14 +429,13 @@ h3 {
 .dashboard-due-card h4 {
   margin: 0;
   font-size: 0.82rem;
-  color: #4b5563;
+  color: var(--color-text-secondary);
 }
 
 .dashboard-due-card p {
   margin: var(--space-1) 0 0;
   font-size: 1.1rem;
   font-weight: 600;
-  color: #111827;
 }
 
 .row,
