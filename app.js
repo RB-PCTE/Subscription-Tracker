@@ -127,18 +127,9 @@ const SUBSCRIPTION_SORT_OPTIONS = {
 };
 
 const SUBSCRIPTION_SEARCH_FIELD_CANDIDATES = [
-  { filterKey: "plan", requiresColumn: "plan" },
-  { filterKey: "customer_company_name", requiresColumn: "customer_company_name" },
-  { filterKey: "customer_company", requiresColumn: "customer_company" },
-  { filterKey: "equipment_name", requiresColumn: "equipment_name" },
-  { filterKey: "device_name", requiresColumn: "device_name" },
   { filterKey: "product_name", requiresColumn: "product_name" },
+  { filterKey: "customer", requiresColumn: "customer" },
   { filterKey: "serial_number", requiresColumn: "serial_number" },
-  { filterKey: "subscription_name", requiresColumn: "subscription_name" },
-  { filterKey: "name", requiresColumn: "name" },
-  { filterKey: "subscription_metadata->>customerCompanyName", requiresColumn: "subscription_metadata" },
-  { filterKey: "subscription_metadata->>equipmentName", requiresColumn: "subscription_metadata" },
-  { filterKey: "subscription_metadata->>serialNumber", requiresColumn: "subscription_metadata" },
 ];
 
 const WORKBENCH_GROUPS = [
@@ -388,53 +379,38 @@ function formatSubscriptionName(row) {
   return generateSubscriptionDisplayName(metadata, row);
 }
 
-function parseEmbeddedMetadata(notesValue) {
+function splitEmbeddedMetadata(notesValue) {
   const notesText = (notesValue || "").toString();
   const marker = "__SUBSCRIPTION_METADATA__:";
   const markerIndex = notesText.lastIndexOf(marker);
 
   if (markerIndex === -1) {
-    return { metadata: null, userNotes: notesText.trim() || null };
+    return { userNotes: notesText.trim() || null };
   }
 
-  const metadataText = notesText.slice(markerIndex + marker.length).trim();
   const userNotes = notesText.slice(0, markerIndex).trim() || null;
-
-  if (!metadataText) {
-    return { metadata: null, userNotes };
-  }
-
-  try {
-    const metadata = JSON.parse(metadataText);
-    return { metadata: typeof metadata === "object" && metadata ? metadata : null, userNotes };
-  } catch (error) {
-    console.warn("Unable to parse embedded subscription metadata.", error);
-    return { metadata: null, userNotes: notesText.trim() || null };
-  }
+  return { userNotes };
 }
 
 function getSubscriptionMetadata(row = {}) {
-  const embedded = parseEmbeddedMetadata(row.notes);
   const structured = row.subscription_metadata && typeof row.subscription_metadata === "object" ? row.subscription_metadata : null;
 
   return {
     customerCompanyName:
+      row.customer ||
       row.customer_company_name ||
-      row.customer_company ||
       structured?.customerCompanyName ||
-      embedded.metadata?.customerCompanyName ||
       "",
-    contactName: row.contact_name || structured?.contactName || embedded.metadata?.contactName || "",
-    contactEmail: row.contact_email || structured?.contactEmail || embedded.metadata?.contactEmail || "",
-    contactPhone: row.contact_phone || structured?.contactPhone || embedded.metadata?.contactPhone || "",
+    contactName: row.contact_name || structured?.contactName || "",
+    contactEmail: row.contact_email || structured?.contactEmail || "",
+    contactPhone: row.contact_phone || structured?.contactPhone || "",
     equipmentName:
       row.equipment_name ||
       row.device_name ||
       structured?.equipmentName ||
-      embedded.metadata?.equipmentName ||
       row.product_name ||
       "",
-    serialNumber: row.serial_number || structured?.serialNumber || embedded.metadata?.serialNumber || "",
+    serialNumber: row.serial_number || structured?.serialNumber || "",
   };
 }
 
@@ -466,27 +442,7 @@ function generateSubscriptionDisplayName(metadata = {}, row = {}) {
 }
 
 function getDisplayNotes(row) {
-  return parseEmbeddedMetadata(row.notes).userNotes;
-}
-
-function buildNotesWithMetadata(notes, metadata) {
-  const cleanedNotes = (notes || "").toString().trim();
-  const metadataPayload = {
-    customerCompanyName: metadata.customerCompanyName || "",
-    contactName: metadata.contactName || "",
-    contactEmail: metadata.contactEmail || "",
-    contactPhone: metadata.contactPhone || "",
-    equipmentName: metadata.equipmentName || "",
-    serialNumber: metadata.serialNumber || "",
-  };
-
-  const hasMetadataValue = Object.values(metadataPayload).some((value) => value);
-  if (!hasMetadataValue) {
-    return cleanedNotes || null;
-  }
-
-  const metadataBlock = `__SUBSCRIPTION_METADATA__:${JSON.stringify(metadataPayload)}`;
-  return cleanedNotes ? `${cleanedNotes}\n\n${metadataBlock}` : metadataBlock;
+  return splitEmbeddedMetadata(row.notes).userNotes;
 }
 
 function toStatusLabel(value) {
@@ -797,7 +753,7 @@ function safeGetEndDateValue(row) {
 
 function getCustomerDisplayName(row = {}) {
   const metadata = getSubscriptionMetadata(row);
-  return row.customer_company_name || metadata.customerCompanyName || "—";
+  return row.customer || metadata.customerCompanyName || "—";
 }
 
 function getDaysUntilEndDate(row = {}) {
@@ -1234,11 +1190,9 @@ function getFilteredSubscriptions() {
   const filtered = subscriptions.filter((row) => {
     const matchesSearch =
       !query ||
-      formatSubscriptionName(row).toLowerCase().includes(query) ||
-      (getSubscriptionMetadata(row).customerCompanyName || "").toLowerCase().includes(query) ||
-      (getSubscriptionMetadata(row).equipmentName || "").toLowerCase().includes(query) ||
-      (getSubscriptionMetadata(row).serialNumber || "").toLowerCase().includes(query) ||
-      (row.plan || "").toLowerCase().includes(query);
+      (row.product_name || "").toLowerCase().includes(query) ||
+      (row.customer || "").toLowerCase().includes(query) ||
+      (row.serial_number || "").toLowerCase().includes(query);
 
     const matchesStatus = selectedStatus === "all" || safeCalculateSubscriptionStatus(row) === selectedStatus;
     const matchesFrequency =
@@ -1310,7 +1264,7 @@ function renderSubscriptions(rows) {
     tr.appendChild(nameTd);
 
     const customerTd = document.createElement("td");
-    customerTd.textContent = metadata.customerCompanyName || "—";
+    customerTd.textContent = row.customer || metadata.customerCompanyName || "—";
     tr.appendChild(customerTd);
 
     const cycleTd = document.createElement("td");
@@ -2287,7 +2241,7 @@ function getFormPayload() {
   const payload = {
     product_name: equipmentName || null,
     serial_number: serialNumber || null,
-    customer_company_name: customerCompanyName || null,
+    customer: customerCompanyName || null,
     contact_name: metadata.contactName || null,
     contact_email: metadata.contactEmail || null,
     contact_phone: metadata.contactPhone || null,
@@ -2299,7 +2253,7 @@ function getFormPayload() {
     end_date: calculatedEndDate,
     renewal_outcome: "pending",
     status: "unknown",
-    notes: buildNotesWithMetadata(notes, metadata),
+    notes: notes.trim() || null,
   };
 
   payload.status = calculateSubscriptionStatus(payload);
@@ -2782,7 +2736,7 @@ async function saveSubscription(event) {
     if (error && error.message?.toLowerCase().includes("column")) {
       const {
         serial_number,
-        customer_company_name,
+        customer,
         contact_name,
         contact_email,
         contact_phone,
