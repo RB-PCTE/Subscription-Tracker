@@ -30,6 +30,7 @@
             >
               Invites
             </button>
+            <button type="button" class="nav-item nav-item-sub" data-nav-target="admin-import" id="nav-admin-import">Import</button>
           </div>
         </nav>
       </aside>
@@ -223,6 +224,61 @@
               Action queue for renewal operations. Status remains calculated by the system; workflow progress is tracked manually.
             </p>
             <div id="renewals-list" class="renewals-list"></div>
+          </section>
+
+          <section
+            id="import-section"
+            class="card content-panel is-view-hidden"
+            data-view="admin-import"
+            aria-labelledby="import-heading"
+            hidden
+          >
+            <h2 id="import-heading">Historical Import</h2>
+            <p class="helper-text">
+              Admin-only bulk import for subscriptions and renewal history. Matching is done by <code>serial_number</code>.
+            </p>
+
+            <section class="card nested-card import-card" aria-labelledby="import-files-heading">
+              <h3 id="import-files-heading">1) Upload CSV files</h3>
+              <p class="helper-text">
+                Use two files: <strong>subscriptions.csv</strong> and <strong>renewals.csv</strong>. Workbench history is not imported.
+              </p>
+              <div class="import-template-actions">
+                <button id="download-subscriptions-template-btn" type="button" class="secondary">Download subscriptions template</button>
+                <button id="download-renewals-template-btn" type="button" class="secondary">Download renewals template</button>
+              </div>
+              <div class="import-grid">
+                <label>
+                  subscriptions.csv
+                  <input id="subscriptions-import-file" type="file" accept=".csv,text/csv" />
+                </label>
+                <label>
+                  renewals.csv
+                  <input id="renewals-import-file" type="file" accept=".csv,text/csv" />
+                </label>
+              </div>
+            </section>
+
+            <section class="card nested-card import-card" aria-labelledby="import-validate-heading">
+              <h3 id="import-validate-heading">2) Validate and preview</h3>
+              <div class="import-template-actions">
+                <button id="validate-import-btn" type="button">Validate files</button>
+              </div>
+              <p id="import-status" role="status" aria-live="polite"></p>
+              <div id="import-preview" class="import-preview"></div>
+              <div id="import-errors" class="import-errors"></div>
+            </section>
+
+            <section class="card nested-card import-card" aria-labelledby="import-confirm-heading">
+              <h3 id="import-confirm-heading">3) Confirm import</h3>
+              <p class="helper-text">
+                First release is create-only for safety. Existing subscriptions/renewals are skipped; nothing is overwritten.
+              </p>
+              <div class="import-template-actions">
+                <button id="confirm-import-btn" type="button" disabled>Confirm import</button>
+              </div>
+              <div id="import-results" class="import-results"></div>
+            </section>
           </section>
 
           <section
