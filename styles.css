@@ -265,7 +265,6 @@ h3 {
   text-align: left;
   cursor: pointer;
   transition: border-color 0.15s ease, transform 0.15s ease;
-  color: var(--color-text-primary);
 }
 
 .dashboard-insight-card span {
@@ -273,11 +272,6 @@ h3 {
   margin-top: var(--space-2);
   font-size: 0.82rem;
   color: var(--color-text-secondary);
-}
-
-.dashboard-insight-card h3,
-.dashboard-insight-card p {
-  color: var(--color-text-primary);
 }
 
 .dashboard-insight-card:hover {
@@ -338,7 +332,6 @@ h3 {
   background: #ffffff;
   text-align: left;
   cursor: pointer;
-  color: var(--color-text-primary);
 }
 
 .dashboard-timeline-item:hover {
@@ -413,7 +406,6 @@ h3 {
   gap: var(--space-2);
   border: 1px solid var(--color-border);
   background: #ffffff;
-  color: var(--color-text-primary);
   border-radius: 999px;
   padding: 0.3rem 0.55rem;
   cursor: pointer;
@@ -429,7 +421,6 @@ h3 {
   border: 1px solid var(--color-border);
   border-radius: var(--radius-md);
   background: #ffffff;
-  color: var(--color-text-primary);
   text-align: left;
   padding: var(--space-3);
   cursor: pointer;
