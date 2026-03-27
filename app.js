@@ -1,6 +1,4 @@
 import { supabase } from "./supabaseClient.js";
-const APP_BUILD_VERSION = "20260327-import-fix4";
-console.info("Subscription Tracker build", APP_BUILD_VERSION);
 
 const signedOutView = document.getElementById("signed-out-view");
 const signedInView = document.getElementById("signed-in-view");
