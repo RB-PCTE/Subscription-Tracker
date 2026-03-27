@@ -47,6 +47,11 @@ const adminUsersPanel = document.getElementById("admin-users-panel");
 const adminInvitesPanel = document.getElementById("admin-invites-panel");
 
 const renewalsList = document.getElementById("renewals-list");
+const workbenchHistoryDialog = document.getElementById("workbench-history-dialog");
+const workbenchHistoryTitle = document.getElementById("workbench-history-title");
+const workbenchHistoryPhase = document.getElementById("workbench-history-phase");
+const workbenchHistoryList = document.getElementById("workbench-history-list");
+const closeWorkbenchHistoryButton = document.getElementById("close-workbench-history-btn");
 
 const subscriptionDialog = document.getElementById("subscription-dialog");
 const subscriptionForm = document.getElementById("subscription-form");
@@ -132,9 +137,19 @@ const WORKBENCH_GROUPS = [
 ];
 
 const WORKFLOW_PROGRESS_OPTIONS = {
-  quote: ["not started", "drafting", "sent", "follow up needed", "accepted", "declined"],
-  invoice: ["not started", "prepared", "sent", "awaiting payment", "paid"],
-  "final warning": ["not started", "sent", "follow up needed", "escalated", "closed"],
+  quote: ["sent", "contact issues"],
+  invoice: ["sent", "po received", "eft unpaid", "eft paid"],
+  "final warning": ["churning", "po promised", "eft unpaid"],
+};
+
+const WORKFLOW_PROGRESS_LABELS = {
+  sent: "Sent",
+  "contact issues": "Contact issues",
+  "po received": "PO received",
+  "eft unpaid": "EFT unpaid",
+  "eft paid": "EFT paid",
+  churning: "Churning",
+  "po promised": "PO promised",
 };
 
 function getCurrentPermissions() {
@@ -467,6 +482,11 @@ function toStatusLabel(value) {
     .filter(Boolean)
     .map((part) => part.charAt(0).toUpperCase() + part.slice(1).toLowerCase())
     .join(" ");
+}
+
+function toWorkflowProgressLabel(value) {
+  const normalized = (value || "").toString().trim().toLowerCase();
+  return WORKFLOW_PROGRESS_LABELS[normalized] || toStatusLabel(value);
 }
 
 function escapeHtml(value) {
@@ -819,7 +839,24 @@ function getWorkflowValue(row = {}, statusValue = "") {
     return storedValue;
   }
 
-  return "not started";
+  return options?.[0] || null;
+}
+
+function getCurrentRenewalPhaseContext(row = {}) {
+  const currentTerm = getCurrentTermForSubscription(row);
+  const currentTermStart = getCurrentTermStartDateValue(row) || null;
+  const currentTermEnd = getCurrentTermEndDateValue(row) || null;
+  const termIdentifier = currentTerm?.id || null;
+  const phaseKey = termIdentifier
+    ? `term:${termIdentifier}`
+    : `legacy:${row?.id || "unknown"}:${currentTermStart || "none"}:${currentTermEnd || "none"}`;
+
+  return {
+    phaseKey,
+    termIdentifier,
+    startDate: currentTermStart,
+    endDate: currentTermEnd,
+  };
 }
 
 function sortWorkbenchRowsByUrgency(rows = []) {
@@ -1131,7 +1168,9 @@ function renderRenewalsPanel() {
                     ${WORKFLOW_PROGRESS_OPTIONS[statusValue]
                       .map(
                         (option) =>
-                          `<option value="${option}" ${selectedWorkflowValue === option ? "selected" : ""}>${toStatusLabel(option)}</option>`
+                          `<option value="${option}" ${selectedWorkflowValue === option ? "selected" : ""}>${toWorkflowProgressLabel(
+                            option
+                          )}</option>`
                       )
                       .join("")}
                   </select>
@@ -1149,7 +1188,10 @@ function renderRenewalsPanel() {
               ${canEdit ? "" : "disabled"}
             />
           </label>
-          <button type="button" class="secondary" data-action="save-workflow" ${canEdit ? "" : "disabled"}>Save update</button>
+          <div class="workbench-item-buttons">
+            <button type="button" class="secondary" data-action="view-workflow-history">View</button>
+            <button type="button" class="secondary" data-action="save-workflow" ${canEdit ? "" : "disabled"}>Save update</button>
+          </div>
         </div>
       `;
       groupList.appendChild(card);
@@ -1162,19 +1204,19 @@ function renderRenewalsPanel() {
 
 async function updateRenewalWorkflow(subscriptionId, payload) {
   if (!subscriptionId || !payload || typeof payload !== "object") {
-    return;
+    return false;
   }
 
   const { canEdit } = getCurrentPermissions();
   if (!canEdit) {
     setSubscriptionStatus("Your role is not allowed to update workflow progress.", true);
-    return;
+    return false;
   }
 
   const { data, error } = await updateSubscription(subscriptionId, payload);
   if (error) {
     setSubscriptionStatus(`Unable to save workflow update: ${error.message}`, true);
-    return;
+    return false;
   }
 
   if (data) {
@@ -1185,10 +1227,104 @@ async function updateRenewalWorkflow(subscriptionId, payload) {
   }
 
   setSubscriptionStatus("Renewal workflow updated.");
+  return true;
+}
+
+async function appendWorkflowHistoryEntry({ subscriptionId, row, stage, progressValue, note }) {
+  if (!subscriptionId || !row || !stage || !progressValue) {
+    return { error: null };
+  }
+
+  const { phaseKey, termIdentifier, startDate, endDate } = getCurrentRenewalPhaseContext(row);
+  const historyPayload = {
+    subscription_id: subscriptionId,
+    renewal_phase_key: phaseKey,
+    renewal_term_id: termIdentifier,
+    renewal_phase_start_date: startDate,
+    renewal_phase_end_date: endDate,
+    stage,
+    progress_value: progressValue,
+    note: note || null,
+    updated_by: currentUser?.id || null,
+  };
+
+  const { error } = await supabase.from("subscription_workflow_history").insert(historyPayload);
+  if (error) {
+    const missingTable =
+      (error.message || "").toLowerCase().includes("subscription_workflow_history") &&
+      ((error.message || "").toLowerCase().includes("does not exist") ||
+        (error.message || "").toLowerCase().includes("could not find"));
+    if (missingTable) {
+      console.warn("Workflow history table unavailable; skipping history append.", error);
+      return { error: null };
+    }
+  }
+
+  return { error };
+}
+
+async function openWorkbenchHistoryDialog(subscriptionId) {
+  const row = subscriptions.find((item) => item.id === subscriptionId);
+  if (!row) {
+    setSubscriptionStatus("Unable to open workflow history: subscription not found.", true);
+    return;
+  }
+
+  const { phaseKey, startDate, endDate } = getCurrentRenewalPhaseContext(row);
+  workbenchHistoryTitle.textContent = `Workflow history — ${formatSubscriptionName(row)}`;
+  workbenchHistoryPhase.textContent = `Current renewal phase: ${formatDate(startDate) || "Unknown start"} → ${
+    formatDate(endDate) || "Unknown end"
+  }`;
+  workbenchHistoryList.innerHTML = '<article class="renewal-item"><p>Loading workflow history…</p></article>';
+  workbenchHistoryDialog.showModal();
+
+  const { data, error } = await supabase
+    .from("subscription_workflow_history")
+    .select("stage, progress_value, note, created_at, updated_by")
+    .eq("subscription_id", subscriptionId)
+    .eq("renewal_phase_key", phaseKey)
+    .order("created_at", { ascending: true });
+
+  if (error) {
+    workbenchHistoryList.innerHTML = `<article class="renewal-item"><p>Unable to load workflow history: ${escapeHtml(
+      error.message || "Unknown error"
+    )}</p></article>`;
+    return;
+  }
+
+  const historyRows = data || [];
+  workbenchHistoryList.innerHTML = "";
+
+  if (!historyRows.length) {
+    const statusValue = safeCalculateSubscriptionStatus(row);
+    const stageConfig = getWorkflowFieldConfigByStatus(statusValue);
+    const fallbackProgress = getWorkflowValue(row, statusValue);
+    const fallbackNote = (row.renewal_workflow_note || "").toString().trim();
+    const legacyItem = document.createElement("article");
+    legacyItem.className = "renewal-item";
+    legacyItem.innerHTML = `<p><strong>No workflow entries recorded yet for this renewal phase.</strong></p>
+      <p class="helper-text">Older records may only contain latest values on the subscription row.</p>
+      <p>Stage: ${toStatusLabel(statusValue)}</p>
+      <p>Progress: ${stageConfig && fallbackProgress ? toWorkflowProgressLabel(fallbackProgress) : "—"}</p>
+      <p>Note: ${fallbackNote ? escapeHtml(fallbackNote) : "—"}</p>`;
+    workbenchHistoryList.appendChild(legacyItem);
+    return;
+  }
+
+  historyRows.forEach((entry, index) => {
+    const item = document.createElement("article");
+    item.className = "renewal-item workbench-history-entry";
+    item.innerHTML = `<p><strong>Step ${index + 1}</strong> • ${toStatusLabel(entry.stage)}</p>
+      <p>Progress: ${toWorkflowProgressLabel(entry.progress_value)}</p>
+      <p>Note: ${entry.note ? escapeHtml(entry.note) : "—"}</p>
+      <p>Updated: ${formatTimestamp(entry.created_at) || "—"}</p>
+      <p>Updated by: ${entry.updated_by || "—"}</p>`;
+    workbenchHistoryList.appendChild(item);
+  });
 }
 
 function handleRenewalsWorkbenchClick(event) {
-  const button = event.target.closest("button[data-action='save-workflow']");
+  const button = event.target.closest("button[data-action]");
   if (!button) {
     return;
   }
@@ -1199,19 +1335,56 @@ function handleRenewalsWorkbenchClick(event) {
     return;
   }
 
+  if (button.dataset.action === "view-workflow-history") {
+    void openWorkbenchHistoryDialog(subscriptionId);
+    return;
+  }
+
+  if (button.dataset.action !== "save-workflow") {
+    return;
+  }
+
+  const row = subscriptions.find((item) => item.id === subscriptionId);
+  if (!row) {
+    setSubscriptionStatus("Unable to save workflow update: subscription not found.", true);
+    return;
+  }
+  const statusValue = safeCalculateSubscriptionStatus(row);
+
   const payload = {};
   const workflowSelect = card.querySelector("select[data-workflow-select='true']");
   const workflowColumn = workflowSelect?.dataset.workflowColumn;
+  let progressValue = null;
   if (workflowColumn && workflowSelect?.value) {
     payload[workflowColumn] = workflowSelect.value;
+    progressValue = workflowSelect.value;
   }
 
   const noteInput = card.querySelector("input[data-workflow-note='true']");
+  let noteValue = null;
   if (noteInput) {
-    payload.renewal_workflow_note = (noteInput.value || "").trim() || null;
+    noteValue = (noteInput.value || "").trim() || null;
+    payload.renewal_workflow_note = noteValue;
   }
 
-  void updateRenewalWorkflow(subscriptionId, payload);
+  void (async () => {
+    const didUpdate = await updateRenewalWorkflow(subscriptionId, payload);
+    if (!didUpdate || !progressValue) {
+      return;
+    }
+
+    const { error } = await appendWorkflowHistoryEntry({
+      subscriptionId,
+      row,
+      stage: statusValue,
+      progressValue,
+      note: noteValue,
+    });
+
+    if (error) {
+      setSubscriptionStatus(`Workflow progress saved, but history entry failed: ${error.message}`, true);
+    }
+  })();
 }
 
 function refreshVisibleSubscriptions() {
@@ -2789,6 +2962,7 @@ renewalDialog.addEventListener("close", () => {
 closeManageRenewalsButton.addEventListener("click", () => manageRenewalsDialog.close());
 manageRenewalsList.addEventListener("click", handleManageRenewalsClick);
 closeDetailButton.addEventListener("click", () => detailDialog.close());
+closeWorkbenchHistoryButton.addEventListener("click", () => workbenchHistoryDialog.close());
 inviteForm.addEventListener("submit", grantAccess);
 invitesBody.addEventListener("click", handleInvitesClick);
 renewalsList.addEventListener("click", handleRenewalsWorkbenchClick);
