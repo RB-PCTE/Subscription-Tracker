@@ -842,11 +842,16 @@ function getWorkflowValue(row = {}, statusValue = "") {
   return options?.[0] || null;
 }
 
+function isUuid(value) {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test((value || "").toString());
+}
+
 function getCurrentRenewalPhaseContext(row = {}) {
   const currentTerm = getCurrentTermForSubscription(row);
   const currentTermStart = getCurrentTermStartDateValue(row) || null;
   const currentTermEnd = getCurrentTermEndDateValue(row) || null;
-  const termIdentifier = currentTerm?.id || null;
+  const rawTermIdentifier = currentTerm?.id || null;
+  const termIdentifier = isUuid(rawTermIdentifier) ? rawTermIdentifier : null;
   const phaseKey = termIdentifier
     ? `term:${termIdentifier}`
     : `legacy:${row?.id || "unknown"}:${currentTermStart || "none"}:${currentTermEnd || "none"}`;
