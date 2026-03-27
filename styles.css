@@ -1091,3 +1091,27 @@ dialog::backdrop {
     grid-template-columns: 1fr;
   }
 }
+
+/* Dashboard readability safeguards.
+   Keep this block near EOF so merge conflicts in earlier dashboard styles do not
+   accidentally revert text contrast in button-based dashboard cards. */
+#dashboard-section .dashboard-insight-card,
+#dashboard-section .dashboard-timeline-item,
+#dashboard-section .dashboard-chip,
+#dashboard-section .dashboard-due-card {
+  color: #111827 !important;
+}
+
+#dashboard-section .dashboard-insight-card span,
+#dashboard-section .dashboard-timeline-axis,
+#dashboard-section .dashboard-timeline-item-meta,
+#dashboard-section .dashboard-due-card h4 {
+  color: #4b5563 !important;
+}
+
+#dashboard-section .dashboard-insight-card h3,
+#dashboard-section .dashboard-insight-card p,
+#dashboard-section .dashboard-chip strong,
+#dashboard-section .dashboard-due-card p {
+  color: #111827 !important;
+}
