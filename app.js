@@ -1,4 +1,6 @@
 import { supabase } from "./supabaseClient.js";
+const APP_BUILD_VERSION = "20260327-import-fix4";
+console.info("Subscription Tracker build", APP_BUILD_VERSION);
 
 const signedOutView = document.getElementById("signed-out-view");
 const signedInView = document.getElementById("signed-in-view");
@@ -43,6 +45,7 @@ const subscriptionStatus = document.getElementById("subscription-status");
 const emptyState = document.getElementById("empty-state");
 const subscriptionsTableWrap = document.querySelector(".subscriptions-table-wrap");
 const userManagementSection = document.getElementById("user-management-section");
+const importSection = document.getElementById("import-section");
 const inviteForm = document.getElementById("invite-form");
 const inviteEmailInput = document.getElementById("invite-email-input");
 const inviteRoleSelect = document.getElementById("invite-role-select");
@@ -52,6 +55,16 @@ const invitesBody = document.getElementById("invites-body");
 const appUsersBody = document.getElementById("app-users-body");
 const adminUsersPanel = document.getElementById("admin-users-panel");
 const adminInvitesPanel = document.getElementById("admin-invites-panel");
+const subscriptionsImportFileInput = document.getElementById("subscriptions-import-file");
+const renewalsImportFileInput = document.getElementById("renewals-import-file");
+const downloadSubscriptionsTemplateButton = document.getElementById("download-subscriptions-template-btn");
+const downloadRenewalsTemplateButton = document.getElementById("download-renewals-template-btn");
+const validateImportButton = document.getElementById("validate-import-btn");
+const confirmImportButton = document.getElementById("confirm-import-btn");
+const importStatus = document.getElementById("import-status");
+const importPreview = document.getElementById("import-preview");
+const importErrors = document.getElementById("import-errors");
+const importResults = document.getElementById("import-results");
 
 const renewalsList = document.getElementById("renewals-list");
 const workbenchHistoryDialog = document.getElementById("workbench-history-dialog");
@@ -110,6 +123,7 @@ let searchRefreshTimer = null;
 let subscriptionsColumnInventory = new Set();
 let dashboardTimeScaleDays = Number.parseInt(dashboardTimeScale?.value || "90", 10) || 90;
 let workbenchDrillFilter = null;
+let pendingImportPlan = null;
 
 const ROLE_PERMISSIONS = {
   admin: { canAdd: true, canEdit: true, canDelete: true, canManageUsers: true },
@@ -165,6 +179,27 @@ const WORKFLOW_PROGRESS_LABELS = {
 };
 
 const DASHBOARD_STATUS_ORDER = ["final warning", "invoice", "quote", "attn required", "active", "migrated", "churned", "unknown"];
+const IMPORT_RENEWAL_OUTCOMES = new Set(["renewed", "churned", "migrated"]);
+const SUBSCRIPTIONS_TEMPLATE_HEADERS = [
+  "serial_number",
+  "customer_company_name",
+  "contact_name",
+  "contact_email",
+  "contact_phone",
+  "equipment_name",
+  "plan",
+  "billing_cycle",
+  "start_date",
+  "notes",
+];
+const RENEWALS_TEMPLATE_HEADERS = [
+  "serial_number",
+  "effective_date",
+  "billing_frequency",
+  "renewal_outcome",
+  "notes",
+  "end_date",
+];
 
 function getCurrentPermissions() {
   return ROLE_PERMISSIONS[currentUserRole] || { canAdd: false, canEdit: false, canDelete: false };
@@ -180,6 +215,7 @@ function applyRoleUi() {
   addSubscriptionButton.hidden = !canAdd;
   emptyAddButton.hidden = !canAdd;
   userManagementSection.hidden = !canManageUsers;
+  importSection.hidden = !canManageUsers;
   adminNavGroup.hidden = !canManageUsers;
   newSubscriptionCta.hidden = !canAdd;
 
@@ -3042,6 +3078,8 @@ async function renderAuthState(user) {
     applyRoleUi();
     clearSubscriptions();
     clearUserManagementTables();
+    clearImportUi();
+    setImportStatus("");
     setActiveView("dashboard");
     return;
   }
@@ -3060,6 +3098,8 @@ async function renderAuthState(user) {
       applyRoleUi();
       clearSubscriptions();
       clearUserManagementTables();
+      clearImportUi();
+      setImportStatus("");
       setStatus("You are signed in but not authorised to use this app. Contact an admin.", true);
       return;
     }
@@ -3089,6 +3129,7 @@ async function renderAuthState(user) {
     subscriptionsSection.hidden = false;
     applyRoleUi();
     clearUserManagementTables();
+    clearImportUi();
     setStatus(`Signed in with limited access while role lookup failed: ${error.message}`, true);
     void loadSubscriptions({ source: "role-fallback" });
   }
@@ -3163,6 +3204,617 @@ function handleInvitesClick(event) {
   }
 
   void removeInvite(button.dataset.id);
+}
+
+function setImportStatus(message, isError = false) {
+  importStatus.textContent = message;
+  importStatus.style.color = isError ? "#b91c1c" : "#0f172a";
+}
+
+function clearImportUi() {
+  pendingImportPlan = null;
+  if (confirmImportButton) {
+    confirmImportButton.disabled = true;
+  }
+  if (importPreview) {
+    importPreview.innerHTML = "";
+  }
+  if (importErrors) {
+    importErrors.innerHTML = "";
+  }
+  if (importResults) {
+    importResults.innerHTML = "";
+  }
+}
+
+function escapeCsvValue(value) {
+  const asText = (value || "").toString();
+  const escaped = asText.replaceAll('"', '""');
+  return /[",\n]/.test(asText) ? `"${escaped}"` : escaped;
+}
+
+function downloadCsvTemplate(filename, headers) {
+  const content = `${headers.join(",")}\n`;
+  const blob = new Blob([content], { type: "text/csv;charset=utf-8;" });
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = filename;
+  document.body.appendChild(anchor);
+  anchor.click();
+  document.body.removeChild(anchor);
+  URL.revokeObjectURL(url);
+}
+
+function parseCsv(content = "") {
+  const rows = [];
+  let row = [];
+  let cell = "";
+  let inQuotes = false;
+
+  for (let i = 0; i < content.length; i += 1) {
+    const char = content[i];
+    const nextChar = content[i + 1];
+
+    if (char === '"') {
+      if (inQuotes && nextChar === '"') {
+        cell += '"';
+        i += 1;
+        continue;
+      }
+      inQuotes = !inQuotes;
+      continue;
+    }
+
+    if (char === "," && !inQuotes) {
+      row.push(cell);
+      cell = "";
+      continue;
+    }
+
+    if ((char === "\n" || char === "\r") && !inQuotes) {
+      if (char === "\r" && nextChar === "\n") {
+        i += 1;
+      }
+      row.push(cell);
+      const hasValues = row.some((value) => value !== "");
+      if (hasValues) {
+        rows.push(row);
+      }
+      row = [];
+      cell = "";
+      continue;
+    }
+
+    cell += char;
+  }
+
+  row.push(cell);
+  const hasValues = row.some((value) => value !== "");
+  if (hasValues) {
+    rows.push(row);
+  }
+
+  if (!rows.length) {
+    return { headers: [], rows: [] };
+  }
+
+  const headers = rows[0].map((header) => (header || "").toString().trim().toLowerCase());
+  const dataRows = rows.slice(1).map((values) => {
+    const record = {};
+    headers.forEach((header, index) => {
+      record[header] = (values[index] || "").toString().trim();
+    });
+    return record;
+  });
+
+  return { headers, rows: dataRows };
+}
+
+async function readFileAsText(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve((reader.result || "").toString());
+    reader.onerror = () => reject(new Error(`Unable to read ${file?.name || "file"}.`));
+    reader.readAsText(file);
+  });
+}
+
+function normalizeImportDate(value) {
+  if (!value) {
+    return null;
+  }
+  const parsed = parseDateStartOfDay(value);
+  return parsed ? toIsoDateString(parsed) : null;
+}
+
+function renderImportSummary(summary = {}) {
+  importPreview.innerHTML = `<h4>Preview summary</h4>
+    <p>Validated files: <strong>${escapeHtml(summary.filesValidated || "None")}</strong></p>
+    <ul>
+      <li>Subscriptions to create: <strong>${summary.subscriptionsToCreate || 0}</strong></li>
+      <li>Renewals to create: <strong>${summary.renewalsToCreate || 0}</strong></li>
+      <li>Unmatched renewals: <strong>${summary.unmatchedRenewals || 0}</strong></li>
+      <li>Duplicate serial numbers: <strong>${summary.duplicateSerialNumbers || 0}</strong></li>
+      <li>Invalid rows: <strong>${summary.invalidRows || 0}</strong></li>
+      <li>Existing subscription conflicts: <strong>${summary.existingSubscriptionConflicts || 0}</strong></li>
+      <li>Existing renewal conflicts: <strong>${summary.existingRenewalConflicts || 0}</strong></li>
+    </ul>`;
+}
+
+function renderImportErrors(errors = []) {
+  if (!errors.length) {
+    importErrors.innerHTML = "<p>No validation errors found.</p>";
+    return;
+  }
+
+  const maxErrors = 200;
+  const shown = errors.slice(0, maxErrors);
+  importErrors.innerHTML = `<h4>Row-level validation errors</h4>
+    <ul>${shown
+      .map(
+        (error) =>
+          `<li><strong>${escapeHtml(error.file)} row ${escapeHtml(error.row)}</strong>: ${escapeHtml(error.message)}</li>`
+      )
+      .join("")}</ul>
+    ${errors.length > maxErrors ? `<p>Showing first ${maxErrors} of ${errors.length} errors.</p>` : ""}`;
+}
+
+function renderImportResults(results = {}) {
+  importResults.innerHTML = `<h4>Import results</h4>
+    <ul>
+      <li>Subscriptions created: <strong>${results.subscriptionsCreated || 0}</strong></li>
+      <li>Subscriptions skipped: <strong>${results.subscriptionsSkipped || 0}</strong></li>
+      <li>Subscriptions failed: <strong>${results.subscriptionsFailed || 0}</strong></li>
+      <li>Renewals created: <strong>${results.renewalsCreated || 0}</strong></li>
+      <li>Renewals skipped: <strong>${results.renewalsSkipped || 0}</strong></li>
+      <li>Renewals failed: <strong>${results.renewalsFailed || 0}</strong></li>
+    </ul>`;
+}
+
+function getRequiredMissingFields(record, fields) {
+  return fields.filter((fieldName) => !(record[fieldName] || "").toString().trim());
+}
+
+async function loadAllSubscriptionsForImport() {
+  const { data, error } = await supabase.from("subscriptions").select("*");
+
+  if (error) {
+    throw error;
+  }
+
+  return (data || []).filter((row) => row?.id);
+}
+
+async function insertImportSubscriptionWithFallback(payload) {
+  let workingPayload = { ...payload };
+  let attempts = 0;
+
+  while (attempts < 10) {
+    attempts += 1;
+    const { data, error } = await supabase.from("subscriptions").insert(workingPayload).select("id").single();
+    if (!error && data?.id) {
+      return { id: data.id, error: null };
+    }
+
+    const missingColumn = extractMissingColumnName(error?.message || "");
+    if (!missingColumn || !(missingColumn in workingPayload)) {
+      return { id: null, error };
+    }
+
+    delete workingPayload[missingColumn];
+  }
+
+  return { id: null, error: new Error("Unable to create subscription for import: schema fallback exhausted.") };
+}
+
+function mapExistingSubscriptionsBySerial(rows = [], serialsFilter = []) {
+  const wantedSerials = new Set((serialsFilter || []).map((value) => (value || "").toString().trim()).filter(Boolean));
+  const bySerial = new Map();
+
+  rows.forEach((row) => {
+    const metadata = getSubscriptionMetadata(row);
+    const serial = (metadata.serialNumber || row.serial_number || "").toString().trim();
+    if (!serial) {
+      return;
+    }
+    if (wantedSerials.size > 0 && !wantedSerials.has(serial)) {
+      return;
+    }
+    if (!bySerial.has(serial)) {
+      bySerial.set(serial, []);
+    }
+    bySerial.get(serial).push(row);
+  });
+
+  return bySerial;
+}
+
+async function validateImportFiles() {
+  const { canManageUsers } = getCurrentPermissions();
+  if (!canManageUsers) {
+    setImportStatus("Only admins can use historical import.", true);
+    return;
+  }
+
+  const subscriptionsFile = subscriptionsImportFileInput?.files?.[0];
+  const renewalsFile = renewalsImportFileInput?.files?.[0];
+
+  if (!subscriptionsFile && !renewalsFile) {
+    setImportStatus("Upload at least one CSV file before validating.", true);
+    return;
+  }
+
+  clearImportUi();
+  setImportStatus("Validating CSV files...");
+
+  const errors = [];
+  let subscriptionsCsv = "";
+  let renewalsCsv = "";
+  try {
+    [subscriptionsCsv, renewalsCsv] = await Promise.all([
+      subscriptionsFile ? readFileAsText(subscriptionsFile) : Promise.resolve(""),
+      renewalsFile ? readFileAsText(renewalsFile) : Promise.resolve(""),
+    ]);
+  } catch (error) {
+    setImportStatus(error.message, true);
+    return;
+  }
+
+  const parsedSubscriptions = subscriptionsFile ? parseCsv(subscriptionsCsv) : { headers: [], rows: [] };
+  const parsedRenewals = renewalsFile ? parseCsv(renewalsCsv) : { headers: [], rows: [] };
+
+  if (subscriptionsFile && !parsedSubscriptions.headers.includes("serial_number")) {
+    errors.push({ file: "subscriptions.csv", row: "header", message: "Missing required serial_number column." });
+  }
+  if (renewalsFile && !parsedRenewals.headers.includes("serial_number")) {
+    errors.push({ file: "renewals.csv", row: "header", message: "Missing required serial_number column." });
+  }
+
+  const duplicateSerials = new Set();
+  const subscriptionRowsBySerial = new Map();
+  const normalizedSubscriptionRows = [];
+  parsedSubscriptions.rows.forEach((row, index) => {
+    const rowNumber = index + 2;
+    const serialNumber = (row.serial_number || "").trim();
+    const missing = getRequiredMissingFields(row, ["serial_number"]);
+    if (missing.length) {
+      errors.push({ file: "subscriptions.csv", row: rowNumber, message: `Missing required field(s): ${missing.join(", ")}.` });
+      return;
+    }
+
+    const normalizedStartDate = row.start_date ? normalizeImportDate(row.start_date) : null;
+    if (row.start_date && !normalizedStartDate) {
+      errors.push({ file: "subscriptions.csv", row: rowNumber, message: `Invalid start_date "${row.start_date}". Use YYYY-MM-DD.` });
+      return;
+    }
+
+    if (subscriptionRowsBySerial.has(serialNumber)) {
+      duplicateSerials.add(serialNumber);
+      errors.push({ file: "subscriptions.csv", row: rowNumber, message: `Duplicate serial_number "${serialNumber}".` });
+      return;
+    }
+
+    const normalized = {
+      rowNumber,
+      serial_number: serialNumber,
+      customer_company_name: row.customer_company_name || row.customer_company || null,
+      contact_name: row.contact_name || null,
+      contact_email: row.contact_email || null,
+      contact_phone: row.contact_phone || null,
+      equipment_name: row.equipment_name || row.device_name || null,
+      plan: row.plan || null,
+      billing_cycle: row.billing_cycle || "1 year",
+      start_date: normalizedStartDate,
+      notes: row.notes || null,
+    };
+    subscriptionRowsBySerial.set(serialNumber, normalized);
+    normalizedSubscriptionRows.push(normalized);
+  });
+
+  const renewalRows = [];
+  parsedRenewals.rows.forEach((row, index) => {
+    const rowNumber = index + 2;
+    const serialNumber = (row.serial_number || "").trim();
+    const missing = getRequiredMissingFields(row, ["serial_number", "effective_date", "renewal_outcome"]);
+    if (missing.length) {
+      errors.push({ file: "renewals.csv", row: rowNumber, message: `Missing required field(s): ${missing.join(", ")}.` });
+      return;
+    }
+
+    const effectiveDate = normalizeImportDate(row.effective_date || row.start_date);
+    if (!effectiveDate) {
+      errors.push({ file: "renewals.csv", row: rowNumber, message: `Invalid effective_date "${row.effective_date}". Use YYYY-MM-DD.` });
+      return;
+    }
+
+    const renewalOutcome = normalizeRenewalOutcome(row.renewal_outcome);
+    const rawOutcome = (row.renewal_outcome || "").toString().trim().toLowerCase();
+    if (!IMPORT_RENEWAL_OUTCOMES.has(rawOutcome)) {
+      errors.push({
+        file: "renewals.csv",
+        row: rowNumber,
+        message: `Invalid renewal_outcome "${row.renewal_outcome}". Allowed: renewed, churned, migrated.`,
+      });
+      return;
+    }
+
+    const optionalEndDate = row.end_date ? normalizeImportDate(row.end_date) : null;
+    if (row.end_date && !optionalEndDate) {
+      errors.push({ file: "renewals.csv", row: rowNumber, message: `Invalid end_date "${row.end_date}". Use YYYY-MM-DD.` });
+      return;
+    }
+
+    renewalRows.push({
+      rowNumber,
+      serial_number: serialNumber,
+      start_date: effectiveDate,
+      billing_frequency: row.billing_frequency || row.billing_cycle || null,
+      renewal_outcome: renewalOutcome,
+      notes: row.notes || null,
+      imported_end_date: optionalEndDate,
+    });
+  });
+
+  const serialsFromFiles = [...new Set([...normalizedSubscriptionRows.map((row) => row.serial_number), ...renewalRows.map((row) => row.serial_number)])];
+  let existingSubscriptions = [];
+  let existingBySerial = new Map();
+  try {
+    existingSubscriptions = await loadAllSubscriptionsForImport();
+    existingBySerial = mapExistingSubscriptionsBySerial(existingSubscriptions, serialsFromFiles);
+  } catch (error) {
+    setImportStatus(`Unable to validate existing subscriptions: ${error.message}`, true);
+    return;
+  }
+
+  const existingRenewalsBySubscription = new Map();
+  const existingSubscriptionIds = existingSubscriptions.map((row) => row.id);
+  if (existingSubscriptionIds.length) {
+    const { data, error } = await supabase
+      .from("subscription_renewals")
+      .select("subscription_id, start_date, renewal_outcome")
+      .in("subscription_id", existingSubscriptionIds);
+    if (error) {
+      setImportStatus(`Unable to validate existing renewals: ${error.message}`, true);
+      return;
+    }
+    (data || []).forEach((row) => {
+      if (!existingRenewalsBySubscription.has(row.subscription_id)) {
+        existingRenewalsBySubscription.set(row.subscription_id, new Set());
+      }
+      existingRenewalsBySubscription.get(row.subscription_id).add(`${row.start_date}|${normalizeRenewalOutcome(row.renewal_outcome)}`);
+    });
+  }
+
+  let existingSubscriptionConflicts = 0;
+  normalizedSubscriptionRows.forEach((row) => {
+    const matches = existingBySerial.get(row.serial_number) || [];
+    if (matches.length > 0) {
+      existingSubscriptionConflicts += 1;
+    }
+    if (matches.length > 1) {
+      errors.push({
+        file: "subscriptions.csv",
+        row: row.rowNumber,
+        message: `serial_number "${row.serial_number}" matches multiple existing subscriptions. Import will skip this serial.`,
+      });
+    }
+  });
+
+  let unmatchedRenewals = 0;
+  let existingRenewalConflicts = 0;
+  renewalRows.forEach((row) => {
+    const hasFileSubscription = subscriptionRowsBySerial.has(row.serial_number);
+    const existingMatches = existingBySerial.get(row.serial_number) || [];
+    if (!hasFileSubscription && existingMatches.length === 0) {
+      unmatchedRenewals += 1;
+      errors.push({
+        file: "renewals.csv",
+        row: row.rowNumber,
+        message: `No matching serial_number "${row.serial_number}" found in subscriptions.csv or existing subscriptions.`,
+      });
+      return;
+    }
+    if (existingMatches.length > 1) {
+      unmatchedRenewals += 1;
+      errors.push({
+        file: "renewals.csv",
+        row: row.rowNumber,
+        message: `serial_number "${row.serial_number}" matches multiple existing subscriptions; cannot safely attach renewal.`,
+      });
+      return;
+    }
+    const existingSubscription = existingMatches[0];
+    if (existingSubscription) {
+      const dedupeKey = `${row.start_date}|${row.renewal_outcome}`;
+      const existingRenewalKeys = existingRenewalsBySubscription.get(existingSubscription.id);
+      if (existingRenewalKeys?.has(dedupeKey)) {
+        existingRenewalConflicts += 1;
+      }
+    }
+  });
+
+  const invalidRows = errors.length;
+  const summary = {
+    filesValidated: `${subscriptionsFile ? "subscriptions.csv" : ""}${subscriptionsFile && renewalsFile ? " + " : ""}${
+      renewalsFile ? "renewals.csv" : ""
+    }`,
+    subscriptionsToCreate: Math.max(0, normalizedSubscriptionRows.length - existingSubscriptionConflicts),
+    renewalsToCreate: Math.max(0, renewalRows.length - unmatchedRenewals - existingRenewalConflicts),
+    unmatchedRenewals,
+    duplicateSerialNumbers: duplicateSerials.size,
+    invalidRows,
+    existingSubscriptionConflicts,
+    existingRenewalConflicts,
+  };
+
+  pendingImportPlan = {
+    subscriptions: normalizedSubscriptionRows,
+    renewals: renewalRows,
+    existingBySerial,
+    existingRenewalsBySubscription,
+    summary,
+    errors,
+  };
+
+  renderImportSummary(summary);
+  renderImportErrors(errors);
+
+  const isValid = errors.length === 0;
+  confirmImportButton.disabled = !isValid;
+  const successMessage = subscriptionsFile && renewalsFile
+    ? "Validation complete for subscriptions.csv + renewals.csv. Review preview and confirm import."
+    : subscriptionsFile
+      ? "Validation complete for subscriptions.csv. Review preview and confirm import."
+      : "Validation complete for renewals.csv. Review preview and confirm import.";
+  setImportStatus(isValid ? successMessage : "Validation completed with errors. Resolve errors before importing.", !isValid);
+}
+
+async function confirmHistoricalImport() {
+  const { canManageUsers } = getCurrentPermissions();
+  if (!canManageUsers) {
+    setImportStatus("Only admins can run imports.", true);
+    return;
+  }
+
+  if (!pendingImportPlan) {
+    setImportStatus("Validate files first.", true);
+    return;
+  }
+
+  if (pendingImportPlan.errors.length > 0) {
+    setImportStatus("Import blocked: validation errors must be resolved first.", true);
+    return;
+  }
+
+  confirmImportButton.disabled = true;
+  validateImportButton.disabled = true;
+  setImportStatus("Running historical import...");
+
+  const results = {
+    subscriptionsCreated: 0,
+    subscriptionsSkipped: 0,
+    subscriptionsFailed: 0,
+    renewalsCreated: 0,
+    renewalsSkipped: 0,
+    renewalsFailed: 0,
+  };
+
+  const serialToSubscriptionId = new Map();
+  pendingImportPlan.subscriptions.forEach((row) => {
+    const existingMatches = pendingImportPlan.existingBySerial.get(row.serial_number) || [];
+    if (existingMatches.length === 1) {
+      serialToSubscriptionId.set(row.serial_number, existingMatches[0].id);
+      results.subscriptionsSkipped += 1;
+    }
+  });
+
+  for (const row of pendingImportPlan.subscriptions) {
+    if (serialToSubscriptionId.has(row.serial_number)) {
+      continue;
+    }
+
+    const metadata = {
+      customerCompanyName: row.customer_company_name || "",
+      contactName: row.contact_name || "",
+      contactEmail: row.contact_email || "",
+      contactPhone: row.contact_phone || "",
+      equipmentName: row.equipment_name || "",
+      serialNumber: row.serial_number || "",
+    };
+
+    const payload = {
+      serial_number: row.serial_number,
+      customer_company_name: row.customer_company_name,
+      contact_name: row.contact_name,
+      contact_email: row.contact_email,
+      contact_phone: row.contact_phone,
+      equipment_name: row.equipment_name,
+      product_name: row.equipment_name,
+      plan: row.plan,
+      billing_cycle: row.billing_cycle || "1 year",
+      start_date: row.start_date,
+      end_date: calculateEndDateFromValues(row.start_date, row.billing_cycle || "1 year"),
+      renewal_outcome: "renewed",
+      status: "unknown",
+      subscription_metadata: metadata,
+      notes: buildNotesWithMetadata(row.notes || "", metadata),
+    };
+    payload.status = calculateSubscriptionStatus(payload);
+
+    const { id: insertedId, error } = await insertImportSubscriptionWithFallback(payload);
+    if (error || !insertedId) {
+      results.subscriptionsFailed += 1;
+      continue;
+    }
+    serialToSubscriptionId.set(row.serial_number, insertedId);
+    results.subscriptionsCreated += 1;
+  }
+
+  const sortedRenewals = [...pendingImportPlan.renewals].sort((a, b) => {
+    const serialCompare = a.serial_number.localeCompare(b.serial_number);
+    if (serialCompare !== 0) {
+      return serialCompare;
+    }
+    const dateCompare = (a.start_date || "").localeCompare(b.start_date || "");
+    if (dateCompare !== 0) {
+      return dateCompare;
+    }
+    return a.rowNumber - b.rowNumber;
+  });
+
+  for (const row of sortedRenewals) {
+    const subscriptionId = serialToSubscriptionId.get(row.serial_number);
+    if (!subscriptionId) {
+      results.renewalsSkipped += 1;
+      continue;
+    }
+
+    const dedupeKey = `${row.start_date}|${row.renewal_outcome}`;
+    if (!pendingImportPlan.existingRenewalsBySubscription.has(subscriptionId)) {
+      pendingImportPlan.existingRenewalsBySubscription.set(subscriptionId, new Set());
+    }
+    const renewalKeySet = pendingImportPlan.existingRenewalsBySubscription.get(subscriptionId);
+    if (renewalKeySet.has(dedupeKey)) {
+      results.renewalsSkipped += 1;
+      continue;
+    }
+
+    const usesRenewedTerm = isRenewedOutcome(row.renewal_outcome);
+    const billingFrequency = usesRenewedTerm ? row.billing_frequency || "1 year" : null;
+    const computedEndDate = usesRenewedTerm ? row.imported_end_date || calculateEndDateFromValues(row.start_date, billingFrequency) : null;
+    if (usesRenewedTerm && (!billingFrequency || !computedEndDate)) {
+      results.renewalsFailed += 1;
+      continue;
+    }
+
+    const renewalPayload = {
+      subscription_id: subscriptionId,
+      start_date: row.start_date,
+      end_date: computedEndDate,
+      billing_frequency: billingFrequency,
+      renewal_outcome: row.renewal_outcome,
+      status: calculateSubscriptionStatus(
+        { id: subscriptionId, renewal_outcome: row.renewal_outcome, start_date: row.start_date, end_date: computedEndDate },
+        { subscription_id: subscriptionId, start_date: row.start_date, end_date: computedEndDate, renewal_outcome: row.renewal_outcome }
+      ),
+      notes: row.notes || null,
+    };
+
+    const { error } = await supabase.from("subscription_renewals").insert(renewalPayload);
+    if (error) {
+      results.renewalsFailed += 1;
+      continue;
+    }
+
+    renewalKeySet.add(dedupeKey);
+    results.renewalsCreated += 1;
+  }
+
+  renderImportResults(results);
+  validateImportButton.disabled = false;
+  setImportStatus("Historical import finished. Review created/skipped/failed counts.");
+  await loadSubscriptions({ source: "historical-import" });
 }
 
 async function loadUser() {
@@ -3466,6 +4118,24 @@ closeWorkbenchHistoryButton.addEventListener("click", () => workbenchHistoryDial
 inviteForm.addEventListener("submit", grantAccess);
 invitesBody.addEventListener("click", handleInvitesClick);
 renewalsList.addEventListener("click", handleRenewalsWorkbenchClick);
+downloadSubscriptionsTemplateButton?.addEventListener("click", () =>
+  downloadCsvTemplate("subscriptions-template.csv", SUBSCRIPTIONS_TEMPLATE_HEADERS.map(escapeCsvValue))
+);
+downloadRenewalsTemplateButton?.addEventListener("click", () =>
+  downloadCsvTemplate("renewals-template.csv", RENEWALS_TEMPLATE_HEADERS.map(escapeCsvValue))
+);
+validateImportButton?.addEventListener("click", () => {
+  void validateImportFiles();
+});
+confirmImportButton?.addEventListener("click", () => {
+  void confirmHistoricalImport();
+});
+[subscriptionsImportFileInput, renewalsImportFileInput].forEach((input) =>
+  input?.addEventListener("change", () => {
+    clearImportUi();
+    setImportStatus("Files changed. Re-run validation before importing.");
+  })
+);
 sendMagicLinkButton.addEventListener("click", sendMagicLink);
 signInPasswordButton.addEventListener("click", signInWithPassword);
 signUpPasswordButton.addEventListener("click", signUpWithPassword);
