@@ -1204,19 +1204,19 @@ function renderRenewalsPanel() {
 
 async function updateRenewalWorkflow(subscriptionId, payload) {
   if (!subscriptionId || !payload || typeof payload !== "object") {
-    return false;
+    return { didUpdate: false, updatedRow: null };
   }
 
   const { canEdit } = getCurrentPermissions();
   if (!canEdit) {
     setSubscriptionStatus("Your role is not allowed to update workflow progress.", true);
-    return false;
+    return { didUpdate: false, updatedRow: null };
   }
 
   const { data, error } = await updateSubscription(subscriptionId, payload);
   if (error) {
     setSubscriptionStatus(`Unable to save workflow update: ${error.message}`, true);
-    return false;
+    return { didUpdate: false, updatedRow: null };
   }
 
   if (data) {
@@ -1226,8 +1226,9 @@ async function updateRenewalWorkflow(subscriptionId, payload) {
     await loadSubscriptions({ source: "workflow-update" });
   }
 
+  const updatedRow = data || subscriptions.find((item) => item.id === subscriptionId) || null;
   setSubscriptionStatus("Renewal workflow updated.");
-  return true;
+  return { didUpdate: true, updatedRow };
 }
 
 async function appendWorkflowHistoryEntry({ subscriptionId, row, stage, progressValue, note }) {
@@ -1248,6 +1249,7 @@ async function appendWorkflowHistoryEntry({ subscriptionId, row, stage, progress
     updated_by: currentUser?.id || null,
   };
 
+  console.debug("appendWorkflowHistoryEntry payload", historyPayload);
   const { error } = await supabase.from("subscription_workflow_history").insert(historyPayload);
   if (error) {
     const missingTable =
@@ -1270,7 +1272,7 @@ async function openWorkbenchHistoryDialog(subscriptionId) {
     return;
   }
 
-  const { phaseKey, startDate, endDate } = getCurrentRenewalPhaseContext(row);
+  const { phaseKey, termIdentifier, startDate, endDate } = getCurrentRenewalPhaseContext(row);
   workbenchHistoryTitle.textContent = `Workflow history — ${formatSubscriptionName(row)}`;
   workbenchHistoryPhase.textContent = `Current renewal phase: ${formatDate(startDate) || "Unknown start"} → ${
     formatDate(endDate) || "Unknown end"
@@ -1278,12 +1280,25 @@ async function openWorkbenchHistoryDialog(subscriptionId) {
   workbenchHistoryList.innerHTML = '<article class="renewal-item"><p>Loading workflow history…</p></article>';
   workbenchHistoryDialog.showModal();
 
-  const { data, error } = await supabase
+  let historyQuery = supabase
     .from("subscription_workflow_history")
-    .select("stage, progress_value, note, created_at, updated_by")
-    .eq("subscription_id", subscriptionId)
-    .eq("renewal_phase_key", phaseKey)
-    .order("created_at", { ascending: true });
+    .select("id, stage, progress_value, note, created_at, updated_by")
+    .eq("subscription_id", subscriptionId);
+
+  if (termIdentifier) {
+    historyQuery = historyQuery.eq("renewal_term_id", termIdentifier);
+  } else if (startDate || endDate) {
+    if (startDate) {
+      historyQuery = historyQuery.eq("renewal_phase_start_date", startDate);
+    }
+    if (endDate) {
+      historyQuery = historyQuery.eq("renewal_phase_end_date", endDate);
+    }
+  } else {
+    historyQuery = historyQuery.eq("renewal_phase_key", phaseKey);
+  }
+
+  const { data, error } = await historyQuery.order("created_at", { ascending: true }).order("id", { ascending: true });
 
   if (error) {
     workbenchHistoryList.innerHTML = `<article class="renewal-item"><p>Unable to load workflow history: ${escapeHtml(
@@ -1293,6 +1308,14 @@ async function openWorkbenchHistoryDialog(subscriptionId) {
   }
 
   const historyRows = data || [];
+  console.debug("openWorkbenchHistoryDialog rows", {
+    subscriptionId,
+    phaseKey,
+    termIdentifier,
+    startDate,
+    endDate,
+    rowCount: historyRows.length,
+  });
   workbenchHistoryList.innerHTML = "";
 
   if (!historyRows.length) {
@@ -1368,14 +1391,15 @@ function handleRenewalsWorkbenchClick(event) {
   }
 
   void (async () => {
-    const didUpdate = await updateRenewalWorkflow(subscriptionId, payload);
+    console.debug("save-workflow payload", { subscriptionId, statusValue, payload, progressValue, noteValue });
+    const { didUpdate, updatedRow } = await updateRenewalWorkflow(subscriptionId, payload);
     if (!didUpdate || !progressValue) {
       return;
     }
 
     const { error } = await appendWorkflowHistoryEntry({
       subscriptionId,
-      row,
+      row: updatedRow || row,
       stage: statusValue,
       progressValue,
       note: noteValue,
