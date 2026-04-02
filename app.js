@@ -134,8 +134,8 @@ const SUBSCRIPTION_SEARCH_FIELD_CANDIDATES = [
 
 const WORKBENCH_GROUPS = [
   { key: "needs-attention", label: "Needs Attention", statuses: ["attn required", "final warning"] },
-  { key: "quote", label: "Quote", statuses: ["quote"] },
   { key: "invoice", label: "Invoice", statuses: ["invoice"] },
+  { key: "quote", label: "Quote", statuses: ["quote"] },
   { key: "active", label: "Active", statuses: ["active"] },
 ];
 
