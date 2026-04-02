@@ -12,7 +12,6 @@ const userEmail = document.getElementById("user-email");
 const authStatus = document.getElementById("auth-status");
 const roleStatus = document.getElementById("role-status");
 const currentUserArea = document.getElementById("current-user-area");
-const newSubscriptionCta = document.getElementById("new-subscription-cta");
 const adminNavGroup = document.getElementById("admin-nav-group");
 const navButtons = document.querySelectorAll("[data-nav-target]");
 const contentPanels = document.querySelectorAll(".content-panel");
@@ -172,7 +171,6 @@ function applyRoleUi() {
   emptyAddButton.hidden = !canAdd;
   userManagementSection.hidden = !canManageUsers;
   adminNavGroup.hidden = !canManageUsers;
-  newSubscriptionCta.hidden = !canAdd;
 
   if (!canManageUsers && activeView.startsWith("admin-")) {
     setActiveView("dashboard");
@@ -3381,10 +3379,6 @@ sortControl.addEventListener("change", () => {
 });
 addSubscriptionButton.addEventListener("click", openAddForm);
 emptyAddButton.addEventListener("click", openAddForm);
-newSubscriptionCta.addEventListener("click", () => {
-  setActiveView("subscriptions");
-  openSubscriptionModal("create");
-});
 document.querySelector(".sidebar-nav").addEventListener("click", handleNavClick);
 dashboardTimeScale?.addEventListener("change", handleDashboardTimeScaleChange);
 document.getElementById("dashboard-section")?.addEventListener("click", handleDashboardClick);
