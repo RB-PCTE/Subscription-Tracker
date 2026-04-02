@@ -622,6 +622,12 @@ h3 {
   margin-bottom: var(--space-4);
 }
 
+.subscriptions-header-actions {
+  display: flex;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+
 .subscriptions-header h2 {
   margin-bottom: var(--space-1);
 }
@@ -1077,6 +1083,12 @@ dialog::backdrop {
   gap: var(--space-3);
 }
 
+#csv-import-form {
+  padding: var(--space-5);
+  display: grid;
+  gap: var(--space-3);
+}
+
 #subscription-form label {
   display: grid;
   gap: 0.35rem;
@@ -1128,6 +1140,34 @@ dialog::backdrop {
 #renewal-form select {
   width: 100%;
   min-width: 0;
+}
+
+#csv-import-form input {
+  width: 100%;
+  min-width: 0;
+}
+
+.csv-import-actions {
+  justify-content: flex-start;
+}
+
+.csv-import-results {
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  padding: var(--space-3);
+  background: #f8fafc;
+}
+
+.csv-import-results p,
+.csv-import-results ul {
+  margin: 0;
+}
+
+.csv-import-results ul {
+  margin-top: var(--space-2);
+  padding-left: 1.2rem;
+  display: grid;
+  gap: 0.2rem;
 }
 
 .detail-layout {

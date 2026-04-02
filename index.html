@@ -145,7 +145,10 @@
                 <h2 id="subscriptions-heading">Subscriptions</h2>
                 <p id="subscriptions-subtitle" class="helper-text">0 total subscriptions</p>
               </div>
-              <button id="add-subscription-btn" type="button">+ New subscription</button>
+              <div class="subscriptions-header-actions">
+                <button id="import-csv-btn" type="button" class="secondary" hidden>Import CSV</button>
+                <button id="add-subscription-btn" type="button">+ New subscription</button>
+              </div>
             </div>
 
             <div class="subscriptions-toolbar" aria-label="Subscription filters">
@@ -498,6 +501,28 @@
           <div id="detail-renewal-history" class="renewals-list"></div>
         </section>
       </article>
+    </dialog>
+
+    <dialog id="csv-import-dialog">
+      <form id="csv-import-form" method="dialog" novalidate>
+        <h3>Import subscriptions from CSV</h3>
+        <p class="helper-text">Only creates new subscription rows. Empty rows are ignored.</p>
+
+        <label>
+          CSV file
+          <input id="csv-file-input" name="csv_file" type="file" accept=".csv,text/csv" required />
+        </label>
+
+        <div class="dialog-actions csv-import-actions">
+          <button id="csv-download-template-btn" type="button" class="secondary">Download template</button>
+          <button id="csv-import-submit-btn" type="submit">Upload and Import</button>
+          <button id="csv-import-cancel-btn" type="button" class="secondary">Close</button>
+        </div>
+
+        <div id="csv-import-results" class="csv-import-results" aria-live="polite">
+          <p class="helper-text">No import run yet.</p>
+        </div>
+      </form>
     </dialog>
 
     <script type="module" src="./app.js"></script>

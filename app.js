@@ -29,6 +29,7 @@ const dashboardDueBuckets = document.getElementById("dashboard-due-buckets");
 
 const subscriptionsSection = document.getElementById("subscriptions-section");
 const addSubscriptionButton = document.getElementById("add-subscription-btn");
+const importCsvButton = document.getElementById("import-csv-btn");
 const emptyAddButton = document.getElementById("empty-add-btn");
 const subscriptionsSubtitle = document.getElementById("subscriptions-subtitle");
 const emptyStateTitle = document.getElementById("empty-state-title");
@@ -90,6 +91,13 @@ const detailTitle = document.getElementById("detail-title");
 const detailMetadataList = document.getElementById("detail-metadata-list");
 const detailCurrentTermList = document.getElementById("detail-current-term-list");
 const detailRenewalHistory = document.getElementById("detail-renewal-history");
+const csvImportDialog = document.getElementById("csv-import-dialog");
+const csvImportForm = document.getElementById("csv-import-form");
+const csvFileInput = document.getElementById("csv-file-input");
+const csvDownloadTemplateButton = document.getElementById("csv-download-template-btn");
+const csvImportSubmitButton = document.getElementById("csv-import-submit-btn");
+const csvImportCancelButton = document.getElementById("csv-import-cancel-btn");
+const csvImportResults = document.getElementById("csv-import-results");
 
 let currentUser = null;
 let currentUserRole = null;
@@ -109,6 +117,7 @@ let searchRefreshTimer = null;
 let subscriptionsColumnInventory = new Set();
 let dashboardTimeScaleDays = Number.parseInt(dashboardTimeScale?.value || "90", 10) || 90;
 let workbenchDrillFilter = null;
+let csvImportInProgress = false;
 
 const ROLE_PERMISSIONS = {
   admin: { canAdd: true, canEdit: true, canDelete: true, canManageUsers: true },
@@ -167,13 +176,267 @@ function setRoleStatus(message, isError = false) {
 
 function applyRoleUi() {
   const { canAdd, canManageUsers } = getCurrentPermissions();
+  const isAdmin = currentUserRole === "admin";
   addSubscriptionButton.hidden = !canAdd;
+  importCsvButton.hidden = !isAdmin;
   emptyAddButton.hidden = !canAdd;
   userManagementSection.hidden = !canManageUsers;
   adminNavGroup.hidden = !canManageUsers;
 
   if (!canManageUsers && activeView.startsWith("admin-")) {
     setActiveView("dashboard");
+  }
+}
+
+function normalizeCsvCell(value) {
+  return (value || "").toString().trim();
+}
+
+function parseCsvLine(line) {
+  const cells = [];
+  let currentCell = "";
+  let inQuotes = false;
+
+  for (let index = 0; index < line.length; index += 1) {
+    const char = line[index];
+    const nextChar = line[index + 1];
+
+    if (char === '"' && inQuotes && nextChar === '"') {
+      currentCell += '"';
+      index += 1;
+      continue;
+    }
+
+    if (char === '"') {
+      inQuotes = !inQuotes;
+      continue;
+    }
+
+    if (char === "," && !inQuotes) {
+      cells.push(currentCell);
+      currentCell = "";
+      continue;
+    }
+
+    currentCell += char;
+  }
+
+  cells.push(currentCell);
+  return cells.map((cell) => normalizeCsvCell(cell));
+}
+
+function parseCsvText(csvText) {
+  const lines = (csvText || "").replace(/\r\n/g, "\n").replace(/\r/g, "\n").split("\n");
+  const nonEmptyLines = lines.filter((line) => line.trim().length > 0);
+
+  if (!nonEmptyLines.length) {
+    return { headers: [], rows: [] };
+  }
+
+  const headers = parseCsvLine(nonEmptyLines[0]).map((header) => header.trim());
+  const rows = nonEmptyLines.slice(1).map((line) => parseCsvLine(line));
+  return { headers, rows };
+}
+
+function renderCsvImportResultSummary({ imported = 0, skipped = 0, errors = [] }) {
+  if (!csvImportResults) {
+    return;
+  }
+
+  const summary = document.createElement("div");
+  summary.innerHTML = `<p><strong>Imported:</strong> ${imported}</p><p><strong>Skipped:</strong> ${skipped}</p>`;
+
+  if (!errors.length) {
+    const noError = document.createElement("p");
+    noError.className = "helper-text";
+    noError.textContent = "No row-level errors.";
+    csvImportResults.replaceChildren(summary, noError);
+    return;
+  }
+
+  const errorHeading = document.createElement("p");
+  errorHeading.innerHTML = "<strong>Errors:</strong>";
+  const errorList = document.createElement("ul");
+  errors.forEach((error) => {
+    const li = document.createElement("li");
+    li.textContent = error;
+    errorList.appendChild(li);
+  });
+
+  csvImportResults.replaceChildren(summary, errorHeading, errorList);
+}
+
+function downloadCsvTemplate() {
+  const templateHeader = "product_name,plan,billing_cycle,renewal_date,status,notes\n";
+  const blob = new Blob([templateHeader], { type: "text/csv;charset=utf-8;" });
+  const link = document.createElement("a");
+  link.href = URL.createObjectURL(blob);
+  link.download = "subscriptions-import-template.csv";
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  URL.revokeObjectURL(link.href);
+}
+
+function isValidIsoDate(value) {
+  if (!value) {
+    return true;
+  }
+
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+    return false;
+  }
+
+  const parsed = new Date(`${value}T00:00:00Z`);
+  return !Number.isNaN(parsed.getTime()) && parsed.toISOString().slice(0, 10) === value;
+}
+
+function openCsvImportModal() {
+  if (currentUserRole !== "admin") {
+    setSubscriptionStatus("Only admins can import CSV files.", true);
+    return;
+  }
+
+  csvImportForm.reset();
+  csvImportResults.innerHTML = '<p class="helper-text">No import run yet.</p>';
+  csvImportDialog.showModal();
+}
+
+async function importSubscriptionsCsv(event) {
+  event.preventDefault();
+
+  if (csvImportInProgress) {
+    return;
+  }
+
+  if (currentUserRole !== "admin") {
+    setSubscriptionStatus("Only admins can import CSV files.", true);
+    return;
+  }
+
+  const file = csvFileInput.files?.[0];
+  if (!file) {
+    renderCsvImportResultSummary({
+      imported: 0,
+      skipped: 0,
+      errors: ["Please choose a CSV file before importing."],
+    });
+    return;
+  }
+
+  const expectedHeaders = ["product_name", "plan", "billing_cycle", "renewal_date", "status", "notes"];
+  const errors = [];
+  let imported = 0;
+  let skipped = 0;
+
+  csvImportInProgress = true;
+  csvImportSubmitButton.disabled = true;
+
+  try {
+    const csvText = await file.text();
+    const { headers, rows } = parseCsvText(csvText);
+    const normalizedHeaders = headers.map((header) => normalizeCsvCell(header));
+
+    if (normalizedHeaders.join(",") !== expectedHeaders.join(",")) {
+      renderCsvImportResultSummary({
+        imported: 0,
+        skipped: rows.length,
+        errors: [
+          `CSV headers must be exactly: ${expectedHeaders.join(",")}`,
+        ],
+      });
+      return;
+    }
+
+    const actorId = currentUser?.id || null;
+    if (!actorId) {
+      renderCsvImportResultSummary({
+        imported: 0,
+        skipped: rows.length,
+        errors: ["Unable to determine current authenticated user id."],
+      });
+      return;
+    }
+
+    for (let index = 0; index < rows.length; index += 1) {
+      const rawRow = rows[index];
+      const rowNumber = index + 2;
+      const padded = [...rawRow];
+      while (padded.length < expectedHeaders.length) {
+        padded.push("");
+      }
+
+      const rowObject = {
+        product_name: normalizeCsvCell(padded[0]),
+        plan: normalizeCsvCell(padded[1]),
+        billing_cycle: normalizeCsvCell(padded[2]),
+        renewal_date: normalizeCsvCell(padded[3]),
+        status: normalizeCsvCell(padded[4]),
+        notes: normalizeCsvCell(padded[5]),
+      };
+
+      const isEmptyRow = Object.values(rowObject).every((value) => !value);
+      if (isEmptyRow) {
+        continue;
+      }
+
+      if (!rowObject.billing_cycle) {
+        skipped += 1;
+        errors.push(`Row ${rowNumber}: billing_cycle is required.`);
+        continue;
+      }
+
+      if (!rowObject.status) {
+        skipped += 1;
+        errors.push(`Row ${rowNumber}: status is required.`);
+        continue;
+      }
+
+      if (!isValidIsoDate(rowObject.renewal_date)) {
+        skipped += 1;
+        errors.push(`Row ${rowNumber}: renewal_date must be a valid date (YYYY-MM-DD).`);
+        continue;
+      }
+
+      const insertPayload = {
+        product_name: rowObject.product_name || null,
+        plan: rowObject.plan || null,
+        billing_cycle: rowObject.billing_cycle,
+        renewal_date: rowObject.renewal_date || null,
+        status: rowObject.status,
+        notes: rowObject.notes || null,
+        created_by: actorId,
+        quote_progress: "not started",
+        invoice_progress: "not started",
+        final_warning_progress: "not started",
+      };
+
+      const { error } = await supabase.from("subscriptions").insert(insertPayload);
+      if (error) {
+        skipped += 1;
+        errors.push(`Row ${rowNumber}: ${error.message}`);
+        continue;
+      }
+
+      imported += 1;
+    }
+
+    renderCsvImportResultSummary({ imported, skipped, errors });
+    if (imported > 0) {
+      setSubscriptionStatus(`CSV import complete. Imported ${imported}, skipped ${skipped}.`);
+      await loadSubscriptions({ source: "csv-import" });
+    } else {
+      setSubscriptionStatus(`CSV import finished. Imported 0, skipped ${skipped}.`, skipped > 0);
+    }
+  } catch (error) {
+    renderCsvImportResultSummary({
+      imported: 0,
+      skipped: 0,
+      errors: [error.message || "Unable to read CSV file."],
+    });
+  } finally {
+    csvImportInProgress = false;
+    csvImportSubmitButton.disabled = false;
   }
 }
 
@@ -3378,6 +3641,7 @@ sortControl.addEventListener("change", () => {
   void loadSubscriptions({ source: "sort-control" });
 });
 addSubscriptionButton.addEventListener("click", openAddForm);
+importCsvButton.addEventListener("click", openCsvImportModal);
 emptyAddButton.addEventListener("click", openAddForm);
 document.querySelector(".sidebar-nav").addEventListener("click", handleNavClick);
 dashboardTimeScale?.addEventListener("change", handleDashboardTimeScaleChange);
@@ -3401,6 +3665,9 @@ subscriptionForm.addEventListener("submit", saveSubscription);
   subscriptionForm.elements[fieldName]?.addEventListener("change", updateCalculatedEndDatePreview);
 });
 cancelSubscriptionButton.addEventListener("click", () => subscriptionDialog.close());
+csvImportForm.addEventListener("submit", importSubscriptionsCsv);
+csvDownloadTemplateButton.addEventListener("click", downloadCsvTemplate);
+csvImportCancelButton.addEventListener("click", () => csvImportDialog.close());
 renewalForm.addEventListener("submit", saveRenewal);
 ["renewal_start_date", "billing_cycle", "renewal_outcome"].forEach((fieldName) => {
   const handler = fieldName === "renewal_outcome" ? updateRenewalFormMode : updateRenewalPreview;
