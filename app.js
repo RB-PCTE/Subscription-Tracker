@@ -267,7 +267,7 @@ function renderCsvImportResultSummary({ imported = 0, skipped = 0, errors = [] }
 }
 
 function downloadCsvTemplate() {
-  const templateHeader = "product_name,plan,billing_cycle,renewal_date,status,notes\n";
+  const templateHeader = "product_name,plan,billing_cycle,renewal_date,status,notes,serial_number,customer\n";
   const blob = new Blob([templateHeader], { type: "text/csv;charset=utf-8;" });
   const link = document.createElement("a");
   link.href = URL.createObjectURL(blob);
@@ -324,7 +324,16 @@ async function importSubscriptionsCsv(event) {
     return;
   }
 
-  const expectedHeaders = ["product_name", "plan", "billing_cycle", "renewal_date", "status", "notes"];
+  const expectedHeaders = [
+    "product_name",
+    "plan",
+    "billing_cycle",
+    "renewal_date",
+    "status",
+    "notes",
+    "serial_number",
+    "customer",
+  ];
   const errors = [];
   let imported = 0;
   let skipped = 0;
@@ -373,6 +382,8 @@ async function importSubscriptionsCsv(event) {
         renewal_date: normalizeCsvCell(padded[3]),
         status: normalizeCsvCell(padded[4]),
         notes: normalizeCsvCell(padded[5]),
+        serial_number: normalizeCsvCell(padded[6]),
+        customer: normalizeCsvCell(padded[7]),
       };
 
       const isEmptyRow = Object.values(rowObject).every((value) => !value);
@@ -392,6 +403,12 @@ async function importSubscriptionsCsv(event) {
         continue;
       }
 
+      if (!rowObject.serial_number) {
+        skipped += 1;
+        errors.push(`Row ${rowNumber}: serial_number is required.`);
+        continue;
+      }
+
       if (!isValidIsoDate(rowObject.renewal_date)) {
         skipped += 1;
         errors.push(`Row ${rowNumber}: renewal_date must be a valid date (YYYY-MM-DD).`);
@@ -405,10 +422,13 @@ async function importSubscriptionsCsv(event) {
         renewal_date: rowObject.renewal_date || null,
         status: rowObject.status,
         notes: rowObject.notes || null,
+        serial_number: rowObject.serial_number,
+        customer: rowObject.customer || null,
         created_by: actorId,
         quote_progress: "not started",
         invoice_progress: "not started",
         final_warning_progress: "not started",
+        renewal_workflow_note: null,
       };
 
       const { error } = await supabase.from("subscriptions").insert(insertPayload);
