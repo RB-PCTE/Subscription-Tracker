@@ -798,6 +798,8 @@ function rowMatchesWorkbenchFilter(row, filter = null) {
 
   const statusValue = safeCalculateSubscriptionStatus(row);
   const daysUntil = getDaysUntilEndDate(row);
+  const isOverdueAttnRequired = statusValue === "attn required" && Number.isFinite(daysUntil) && daysUntil < 0;
+  const shouldIncludeOverdueActionable = isOverdueAttnRequired && !filter.excludeOverdueActionable;
 
   if (filter.subscriptionId && row?.id !== filter.subscriptionId) {
     return false;
@@ -805,6 +807,10 @@ function rowMatchesWorkbenchFilter(row, filter = null) {
 
   if (Array.isArray(filter.statuses) && filter.statuses.length && !filter.statuses.includes(statusValue)) {
     return false;
+  }
+
+  if (shouldIncludeOverdueActionable) {
+    return true;
   }
 
   if (Number.isFinite(filter.minDays) && (!Number.isFinite(daysUntil) || daysUntil < filter.minDays)) {
@@ -3279,10 +3285,11 @@ function handleDashboardClick(event) {
 
   if (action === "drill-workbench-window") {
     openWorkbenchWithFilter({
-      label: `Due within ${dashboardTimeScaleDays} days`,
+      label: `Due within ${dashboardTimeScaleDays} days (+ overdue attention)`,
       minDays: 0,
       maxDays: dashboardTimeScaleDays,
       inWindowOnly: true,
+      excludeOverdueActionable: false,
     });
     return;
   }
@@ -3323,19 +3330,19 @@ function handleDashboardClick(event) {
       return;
     }
     if (range === "0-30") {
-      openWorkbenchWithFilter({ label: "Due in 0–30 days", minDays: 0, maxDays: 30 });
+      openWorkbenchWithFilter({ label: "Due in 0–30 days", minDays: 0, maxDays: 30, excludeOverdueActionable: true });
       return;
     }
     if (range === "31-60") {
-      openWorkbenchWithFilter({ label: "Due in 31–60 days", minDays: 31, maxDays: 60 });
+      openWorkbenchWithFilter({ label: "Due in 31–60 days", minDays: 31, maxDays: 60, excludeOverdueActionable: true });
       return;
     }
     if (range === "61-90") {
-      openWorkbenchWithFilter({ label: "Due in 61–90 days", minDays: 61, maxDays: 90 });
+      openWorkbenchWithFilter({ label: "Due in 61–90 days", minDays: 61, maxDays: 90, excludeOverdueActionable: true });
       return;
     }
     if (range === "90-plus") {
-      openWorkbenchWithFilter({ label: "Due in 90+ days", minDays: 91 });
+      openWorkbenchWithFilter({ label: "Due in 90+ days", minDays: 91, excludeOverdueActionable: true });
       return;
     }
   }
