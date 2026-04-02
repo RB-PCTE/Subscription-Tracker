@@ -123,15 +123,21 @@ body {
   box-shadow: var(--shadow-sm);
   padding: var(--space-4) var(--space-5);
   display: grid;
-  grid-template-columns: minmax(180px, 1fr) auto;
+  grid-template-columns: 1fr auto;
   align-items: center;
   gap: var(--space-4);
 }
 
-.top-header-title p {
-  margin: 0;
-  color: var(--color-text-secondary);
-  font-size: var(--font-size-sm);
+.top-header-logo-link {
+  display: inline-flex;
+  align-items: center;
+  min-height: 40px;
+}
+
+.top-header-logo {
+  height: 36px;
+  width: auto;
+  display: block;
 }
 
 input,
@@ -1223,7 +1229,6 @@ dialog::backdrop {
 
   .header-actions {
     justify-self: start;
-    flex-wrap: wrap;
   }
 
   .dashboard-grid {
