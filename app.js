@@ -267,7 +267,7 @@ function renderCsvImportResultSummary({ imported = 0, skipped = 0, errors = [] }
 }
 
 function downloadCsvTemplate() {
-  const templateHeader = "product_name,plan,billing_cycle,renewal_date,notes,serial_number,customer\n";
+  const templateHeader = "product_name,plan,billing_cycle,renewal_date,status,notes,serial_number,customer\n";
   const blob = new Blob([templateHeader], { type: "text/csv;charset=utf-8;" });
   const link = document.createElement("a");
   link.href = URL.createObjectURL(blob);
@@ -329,6 +329,7 @@ async function importSubscriptionsCsv(event) {
     "plan",
     "billing_cycle",
     "renewal_date",
+    "status",
     "notes",
     "serial_number",
     "customer",
@@ -379,9 +380,10 @@ async function importSubscriptionsCsv(event) {
         plan: normalizeCsvCell(padded[1]),
         billing_cycle: normalizeCsvCell(padded[2]),
         renewal_date: normalizeCsvCell(padded[3]),
-        notes: normalizeCsvCell(padded[4]),
-        serial_number: normalizeCsvCell(padded[5]),
-        customer: normalizeCsvCell(padded[6]),
+        status: normalizeCsvCell(padded[4]),
+        notes: normalizeCsvCell(padded[5]),
+        serial_number: normalizeCsvCell(padded[6]),
+        customer: normalizeCsvCell(padded[7]),
       };
 
       const isEmptyRow = Object.values(rowObject).every((value) => !value);
@@ -392,6 +394,12 @@ async function importSubscriptionsCsv(event) {
       if (!rowObject.billing_cycle) {
         skipped += 1;
         errors.push(`Row ${rowNumber}: billing_cycle is required.`);
+        continue;
+      }
+
+      if (!rowObject.serial_number) {
+        skipped += 1;
+        errors.push(`Row ${rowNumber}: serial_number is required.`);
         continue;
       }
 
