@@ -175,7 +175,6 @@ The project includes a backend-only weekly summary email pipeline using a Supaba
 
 - Edge function: `supabase/functions/weekly-summary-email/index.ts`
 - Scheduler migration: `supabase/migrations/20260407_add_weekly_summary_email_automation.sql`
-- Run-log migration: `supabase/migrations/20260407_add_weekly_summary_email_run_logs.sql`
 
 ### What it sends
 
@@ -223,46 +222,6 @@ curl -sS "https://<PROJECT-REF>.supabase.co/functions/v1/weekly-summary-email?dr
   -H "Authorization: Bearer <SUPABASE_ANON_KEY>" \
   -H "x-cron-secret: <MATCHES_WEEKLY_SUMMARY_CRON_SECRET>"
 ```
-
-### How to verify it is working
-
-1. Trigger a manual dry run (safe, does **not** send email):
-
-```bash
-curl -sS "https://<PROJECT-REF>.supabase.co/functions/v1/weekly-summary-email?dry_run=1" \
-  -H "Authorization: Bearer <SUPABASE_ANON_KEY>" \
-  -H "x-cron-secret: <MATCHES_WEEKLY_SUMMARY_CRON_SECRET>" \
-  -X POST \
-  -d '{"trigger":"manual-test"}'
-```
-
-2. Confirm a run log row was written:
-
-```sql
-select created_at, trigger_source, status, recipient, summary_metrics, error_message
-from public.weekly_summary_email_runs
-order by created_at desc
-limit 20;
-```
-
-3. Trigger a real send test:
-
-```bash
-curl -sS "https://<PROJECT-REF>.supabase.co/functions/v1/weekly-summary-email" \
-  -H "Authorization: Bearer <SUPABASE_ANON_KEY>" \
-  -H "x-cron-secret: <MATCHES_WEEKLY_SUMMARY_CRON_SECRET>" \
-  -H "Content-Type: application/json" \
-  -X POST \
-  -d '{"trigger":"manual-send-test"}'
-```
-
-4. Validate success:
-   - API response returns `"ok": true`
-   - recipient inbox receives the HTML email
-   - `public.weekly_summary_email_runs.status = 'sent'`
-
-5. Validate scheduler:
-   - wait for the next cron window, then confirm a new `trigger_source = 'pg_cron'` run row exists.
 
 To remove the job later:
 

@@ -43,17 +43,6 @@ type SummaryItem = {
   workflow: string;
 };
 
-type SummaryMetrics = {
-  totalSubscriptions: number;
-  activeSubscriptions: number;
-  dueIn30Days: number;
-  dueIn60Days: number;
-  needsAttention: number;
-  finalWarning: number;
-  churnedLast7Days: number;
-  migratedLast7Days: number;
-};
-
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL") ?? "";
 const SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
 const RESEND_API_KEY = Deno.env.get("RESEND_API_KEY") ?? "";
@@ -308,31 +297,6 @@ Deno.serve(async (req: Request) => {
   }
 
   const supabase = createClient(SUPABASE_URL, SERVICE_ROLE_KEY);
-  const requestBody = req.method === "POST" ? await req.json().catch(() => ({})) : {};
-  const triggerSource = typeof requestBody?.trigger === "string" ? requestBody.trigger : "manual";
-
-  const logRun = async ({
-    status,
-    recipient,
-    metrics,
-    providerMessageId,
-    errorMessage,
-  }: {
-    status: "dry_run" | "sent" | "failed";
-    recipient: string;
-    metrics: SummaryMetrics | null;
-    providerMessageId?: string | null;
-    errorMessage?: string | null;
-  }) => {
-    await supabase.from("weekly_summary_email_runs").insert({
-      trigger_source: triggerSource,
-      status,
-      recipient,
-      summary_metrics: metrics,
-      provider_message_id: providerMessageId ?? null,
-      error_message: errorMessage ?? null,
-    });
-  };
 
   const [{ data: subscriptions, error: subscriptionsError }, { data: renewals, error: renewalsError }, { data: workflowHistory, error: workflowHistoryError }] =
     await Promise.all([
@@ -392,7 +356,7 @@ Deno.serve(async (req: Request) => {
     };
   });
 
-  const metrics: SummaryMetrics = {
+  const metrics = {
     totalSubscriptions: summaryRows.length,
     activeSubscriptions: summaryRows.filter((row) => row.status === "active").length,
     dueIn30Days: summaryRows.filter((row) => row.endDate && row.endDate >= today && row.endDate <= next30).length,
@@ -466,12 +430,6 @@ Deno.serve(async (req: Request) => {
 
   const dryRun = new URL(req.url).searchParams.get("dry_run") === "1";
   if (dryRun) {
-    await logRun({
-      status: "dry_run",
-      recipient: SUMMARY_RECIPIENT,
-      metrics,
-    });
-
     return new Response(JSON.stringify({ recipient: SUMMARY_RECIPIENT, metrics, html }), {
       status: 200,
       headers: { "Content-Type": "application/json" },
@@ -494,23 +452,8 @@ Deno.serve(async (req: Request) => {
 
   if (!response.ok) {
     const errorBody = await response.text();
-    await logRun({
-      status: "failed",
-      recipient: SUMMARY_RECIPIENT,
-      metrics,
-      errorMessage: errorBody.slice(0, 1000),
-    });
-
     return new Response(errorBody, { status: 502 });
   }
-
-  const responseBody = await response.json().catch(() => ({}));
-  await logRun({
-    status: "sent",
-    recipient: SUMMARY_RECIPIENT,
-    metrics,
-    providerMessageId: typeof responseBody?.id === "string" ? responseBody.id : null,
-  });
 
   return new Response(JSON.stringify({ ok: true, recipient: SUMMARY_RECIPIENT, metrics }), {
     status: 200,
