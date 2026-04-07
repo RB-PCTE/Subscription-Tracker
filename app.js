@@ -397,9 +397,9 @@ async function importSubscriptionsCsv(event) {
         continue;
       }
 
-      if (!rowObject.status) {
+      if (!rowObject.serial_number) {
         skipped += 1;
-        errors.push(`Row ${rowNumber}: status is required.`);
+        errors.push(`Row ${rowNumber}: serial_number is required.`);
         continue;
       }
 
@@ -420,7 +420,6 @@ async function importSubscriptionsCsv(event) {
         plan: rowObject.plan || null,
         billing_cycle: rowObject.billing_cycle,
         renewal_date: rowObject.renewal_date || null,
-        status: rowObject.status,
         notes: rowObject.notes || null,
         serial_number: rowObject.serial_number,
         customer: rowObject.customer || null,
@@ -430,6 +429,7 @@ async function importSubscriptionsCsv(event) {
         final_warning_progress: "not started",
         renewal_workflow_note: null,
       };
+      insertPayload.status = calculateSubscriptionStatus(insertPayload);
 
       const { error } = await supabase.from("subscriptions").insert(insertPayload);
       if (error) {
