@@ -2507,8 +2507,8 @@ function getFormPayload() {
   const equipmentName = (formData.get("equipment_name") || "").toString().trim();
   const serialNumber = (formData.get("serial_number") || "").toString().trim();
 
-  if (!customerCompanyName && !equipmentName && !serialNumber) {
-    throw new Error("Enter at least a customer company, equipment/device, or serial number.");
+  if (!serialNumber) {
+    throw new Error("Serial number is required.");
   }
 
   const metadata = {
@@ -2527,7 +2527,7 @@ function getFormPayload() {
 
   const payload = {
     product_name: equipmentName || null,
-    serial_number: serialNumber || null,
+    serial_number: serialNumber,
     customer: customerCompanyName || null,
     contact_name: metadata.contactName || null,
     contact_email: metadata.contactEmail || null,
@@ -2545,6 +2545,20 @@ function getFormPayload() {
 
   payload.status = calculateSubscriptionStatus(payload);
   return payload;
+}
+
+function getFriendlySubscriptionSaveError(error) {
+  const rawMessage = error?.message || "Unknown error";
+  const normalizedMessage = rawMessage.toLowerCase();
+  const isSerialNumberConflict =
+    error?.code === "23505" &&
+    (normalizedMessage.includes("serial_number") || normalizedMessage.includes("subscriptions_serial_number_key"));
+
+  if (isSerialNumberConflict) {
+    return "This serial number already exists. Enter a different serial number.";
+  }
+
+  return `Unable to save: ${rawMessage}`;
 }
 
 function toLegacyPayload(payload) {
@@ -2618,6 +2632,18 @@ function updateCalculatedEndDatePreview() {
     billing_cycle: subscriptionForm.elements.billing_cycle?.value || null,
   });
   calculatedEndDateInput.value = calculatedEndDate || "";
+}
+
+function validateSerialNumberField() {
+  const serialNumberInput = subscriptionForm.elements.serial_number;
+  if (!serialNumberInput) {
+    return true;
+  }
+
+  const trimmedValue = (serialNumberInput.value || "").trim();
+  const isValid = trimmedValue.length > 0;
+  serialNumberInput.setCustomValidity(isValid ? "" : "Serial number is required.");
+  return isValid;
 }
 
 function renderDetailList(container, rows) {
@@ -2956,6 +2982,11 @@ async function saveSubscription(event) {
 
   formError.textContent = "";
 
+  if (!validateSerialNumberField()) {
+    subscriptionForm.elements.serial_number?.reportValidity();
+    return;
+  }
+
   let payload;
 
   try {
@@ -2987,7 +3018,7 @@ async function saveSubscription(event) {
     }
 
     if (error) {
-      formError.textContent = `Unable to save: ${error.message}`;
+      formError.textContent = getFriendlySubscriptionSaveError(error);
       isSubmittingForm = false;
       saveSubscriptionButton.disabled = false;
       return;
@@ -3042,7 +3073,7 @@ async function saveSubscription(event) {
     }
 
     if (error) {
-      formError.textContent = `Unable to save: ${error.message}`;
+      formError.textContent = getFriendlySubscriptionSaveError(error);
       isSubmittingForm = false;
       saveSubscriptionButton.disabled = false;
       return;
@@ -3678,6 +3709,8 @@ subscriptionForm.addEventListener("submit", saveSubscription);
 ["customer_company_name", "equipment_name", "serial_number"].forEach((fieldName) => {
   subscriptionForm.elements[fieldName]?.addEventListener("input", updateGeneratedNamePreview);
 });
+subscriptionForm.elements.serial_number?.addEventListener("input", validateSerialNumberField);
+subscriptionForm.elements.serial_number?.addEventListener("blur", validateSerialNumberField);
 ["start_date", "billing_cycle"].forEach((fieldName) => {
   subscriptionForm.elements[fieldName]?.addEventListener("input", updateCalculatedStatusPreview);
   subscriptionForm.elements[fieldName]?.addEventListener("change", updateCalculatedStatusPreview);
