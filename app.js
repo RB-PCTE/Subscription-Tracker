@@ -691,7 +691,7 @@ function getSubscriptionMetadata(row = {}) {
       structured?.equipmentName ||
       row.product_name ||
       "",
-    serialNumber: row.serial_number || structured?.serialNumber || "",
+    serialNumber: row.serial_number || structured?.serial_number || structured?.serialNumber || "",
   };
 }
 
@@ -2517,6 +2517,7 @@ function getFormPayload() {
     contactEmail: (formData.get("contact_email") || "").toString().trim(),
     contactPhone: (formData.get("contact_phone") || "").toString().trim(),
     equipmentName,
+    serial_number: serialNumber,
     serialNumber,
   };
   const notes = (formData.get("notes") || "").toString();
@@ -2565,6 +2566,7 @@ function toLegacyPayload(payload) {
   const computedStatus = calculateSubscriptionStatus(payload);
   return {
     product_name: payload.product_name,
+    serial_number: payload.serial_number,
     plan: payload.plan,
     billing_cycle: payload.billing_cycle,
     renewal_date: payload.start_date,
@@ -3053,7 +3055,6 @@ async function saveSubscription(event) {
 
     if (error && error.message?.toLowerCase().includes("column")) {
       const {
-        serial_number,
         customer,
         contact_name,
         contact_email,
