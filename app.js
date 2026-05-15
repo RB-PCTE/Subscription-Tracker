@@ -2577,6 +2577,7 @@ function toLegacyPayload(payload) {
     renewal_date: payload.start_date,
     status: computedStatus || payload.status,
     notes: payload.notes,
+    customer: payload.customer,
   };
 }
 
@@ -3060,7 +3061,6 @@ async function saveSubscription(event) {
 
     if (error && error.message?.toLowerCase().includes("column")) {
       const {
-        customer,
         contact_name,
         contact_email,
         contact_phone,
