@@ -403,9 +403,9 @@ async function importSubscriptionsCsv(event) {
         continue;
       }
 
-      if (!rowObject.serial_number) {
+      if (!rowObject.customer) {
         skipped += 1;
-        errors.push(`Row ${rowNumber}: serial_number is required.`);
+        errors.push(`Row ${rowNumber}: customer is required.`);
         continue;
       }
 
@@ -1475,10 +1475,11 @@ function getFilteredSubscriptions() {
   const selectedFrequency = frequencyFilter.value;
 
   const filtered = subscriptions.filter((row) => {
+    const customerSearchValue = (getCustomerDisplayName(row) || "").toLowerCase();
     const matchesSearch =
       !query ||
       (row.product_name || "").toLowerCase().includes(query) ||
-      (row.customer || "").toLowerCase().includes(query) ||
+      customerSearchValue.includes(query) ||
       (row.serial_number || "").toLowerCase().includes(query);
 
     const matchesStatus = selectedStatus === "all" || safeCalculateSubscriptionStatus(row) === selectedStatus;
@@ -2509,6 +2510,10 @@ function getFormPayload() {
 
   if (!serialNumber) {
     throw new Error("Serial number is required.");
+  }
+
+  if (!customerCompanyName) {
+    throw new Error("Customer company name is required.");
   }
 
   const metadata = {
